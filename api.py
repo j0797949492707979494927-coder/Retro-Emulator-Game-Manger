@@ -311,6 +311,14 @@ def search_thegamesdb(name, platform_id=None, limit=5):
         })
     return results
 
+def get_thegamesdb_cover(title, console_id=None):
+    platform_id = THEGAMESDB_PLATFORMS.get(console_id)
+    results = search_thegamesdb(title, platform_id=platform_id, limit=1)
+    if not results:
+        return None
+    details = scrape_thegamesdb_details(results[0]["url"])
+    return details.get("cover_front") or details.get("clearlogo")
+
 def download_asset(url, folder, prefix):
     if not url:
         return None
@@ -562,6 +570,18 @@ def refresh_covers():
     console = request.args.get("console")
     results = refresh_missing_covers(console)
     return jsonify({"status": "ok", **results})
+
+@app.route("/market_cover")
+def market_cover():
+    title = request.args.get("title")
+    console = request.args.get("console")
+    if not title:
+        return jsonify({"status": "error", "message": "Missing title"}), 400
+    try:
+        cover = get_thegamesdb_cover(title, console_id=console)
+    except requests.RequestException:
+        cover = None
+    return jsonify({"status": "ok", "cover": cover})
 
 @app.route("/proxy_image")
 def proxy_image():

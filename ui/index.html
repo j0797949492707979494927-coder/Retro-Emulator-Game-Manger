@@ -251,6 +251,7 @@
         const API = {
             search: (q) => fetch(`/search?q=${encodeURIComponent(q)}`).then(r => r.json()),
             getGame: (url) => fetch(`/game?url=${encodeURIComponent(url)}`).then(r => r.json()),
+            getMarketCover: (title, console) => fetch(`/market_cover?title=${encodeURIComponent(title)}&console=${encodeURIComponent(console || '')}`).then(r => r.json()),
             listLocal: (console) => fetch(`/list_console?console=${console}`).then(r => r.json()),
             delete: (name, console, game) => {
                 const params = new URLSearchParams();
@@ -412,6 +413,15 @@
             try {
                 const data = await API.getGame(url);
                 const game = data.game;
+                let marketCover = game.thumbnail;
+                if (!marketCover) {
+                    try {
+                        const coverResponse = await API.getMarketCover(game.title, game.console);
+                        if (coverResponse?.cover) {
+                            marketCover = coverResponse.cover;
+                        }
+                    } catch (e) {}
+                }
                 
                 const infoHtml = Object.entries(game.info).map(([k, v]) => `
                     <div class="flex justify-between items-center text-[10px] py-1.5 border-b border-white/5">
@@ -423,7 +433,7 @@
                     <div class="flex gap-10 items-start">
                         <div class="w-64 space-y-4 flex-shrink-0">
                             <div class="w-full h-80 bg-black/60 rounded-3xl border border-white/10 overflow-hidden shadow-2xl">
-                                <img src="${game.thumbnail ? API.proxyImg(game.thumbnail) : 'https://placehold.co/400x600/111/555?text=N/A'}" class="w-full h-full object-cover">
+                                <img src="${marketCover ? API.proxyImg(marketCover) : 'https://placehold.co/400x600/111/555?text=N/A'}" class="w-full h-full object-cover">
                             </div>
                             <div class="p-5 glass rounded-2xl border border-white/5">
                                 <h5 class="text-[9px] font-black text-white/20 uppercase tracking-[0.2em] mb-3 italic">Hardware Specs</h5>
