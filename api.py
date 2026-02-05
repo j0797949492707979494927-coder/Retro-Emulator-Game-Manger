@@ -1,5 +1,6 @@
 from flask import Flask, jsonify, request, send_from_directory
 from bs4 import BeautifulSoup
+import json
 import os, re, urllib.parse, requests
 
 app = Flask(__name__, static_folder="ui", static_url_path="")
@@ -100,12 +101,20 @@ def parse_game(html, url):
     title_node = soup.select_one(".rheader h1")
     info_nodes = soup.select("ul.finfo li")
     screenshots = [safe_url(a.get("href")) for a in soup.select(".ss-area .item a") if a.get("href")]
+    description = None
+    for selector in (".fdesc", ".rdesc", ".description", "#description", ".rtext"):
+        desc_node = soup.select_one(selector)
+        if desc_node:
+            description = " ".join(desc_node.get_text(" ", strip=True).split())
+            if description:
+                break
 
     game = {
         "title": title_node.text.strip() if title_node else None,
         "info": {},
         "screenshots": screenshots,
-        "downloads": []
+        "downloads": [],
+        "description": description
     }
 
     # Info fields
@@ -153,10 +162,30 @@ def parse_game(html, url):
                 game["downloads"].append({
                     "name": rom_name,
                     "local": False,
-                    "download_url": f"/download?url={urllib.parse.quote(rom_url)}&filename={urllib.parse.quote(rom_name)}&console={console}"
+                    "download_url": f"/download?url={urllib.parse.quote(rom_url)}&filename={urllib.parse.quote(rom_name)}&console={console}&game_url={urllib.parse.quote(url)}"
                 })
 
     return game
+
+def sanitize_filename(name):
+    return os.path.basename(name).replace(os.sep, "_")
+
+def download_screenshot(url, folder, index):
+    if not url:
+        return None
+    parsed = urllib.parse.urlparse(url)
+    filename = os.path.basename(parsed.path) or f"screenshot-{index}.jpg"
+    filename = sanitize_filename(filename)
+    file_path = os.path.join(folder, filename)
+    try:
+        with requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, stream=True) as r:
+            r.raise_for_status()
+            with open(file_path, "wb") as f:
+                for chunk in r.iter_content(8192):
+                    f.write(chunk)
+    except requests.RequestException:
+        return None
+    return filename
 
 # ------------------------------
 # Routes
@@ -186,12 +215,14 @@ def download_rom():
     rom_url = request.args.get("url")
     rom_name = request.args.get("filename")
     console = request.args.get("console", "misc")
+    game_url = request.args.get("game_url")
     if not rom_url or not rom_name:
         return jsonify({"error": "Missing parameters"}), 400
 
     folder = os.path.join(ROM_DIR, console)
     os.makedirs(folder, exist_ok=True)
-    file_path = os.path.join(folder, rom_name)
+    safe_rom_name = sanitize_filename(rom_name)
+    file_path = os.path.join(folder, safe_rom_name)
 
     if not os.path.isfile(file_path):
         with requests.get(rom_url, headers={"User-Agent": "Mozilla/5.0"}, stream=True) as r:
@@ -199,6 +230,36 @@ def download_rom():
             with open(file_path, "wb") as f:
                 for chunk in r.iter_content(8192):
                     f.write(chunk)
+
+    if game_url:
+        try:
+            html = curl_get(game_url)
+            game_data = parse_game(html, game_url)
+        except requests.RequestException:
+            game_data = None
+
+        if game_data:
+            base_name = os.path.splitext(safe_rom_name)[0]
+            metadata_path = os.path.join(folder, f"{base_name}.json")
+            screenshots_dir = os.path.join(folder, f"{base_name}_screenshots")
+            os.makedirs(screenshots_dir, exist_ok=True)
+
+            local_screenshots = []
+            for index, screenshot_url in enumerate(game_data.get("screenshots", []), start=1):
+                filename = download_screenshot(screenshot_url, screenshots_dir, index)
+                if filename:
+                    local_screenshots.append(f"/roms/{console}/{os.path.basename(screenshots_dir)}/{filename}")
+
+            metadata = {
+                "rom": safe_rom_name,
+                "title": game_data.get("title"),
+                "info": game_data.get("info", {}),
+                "description": game_data.get("description"),
+                "screenshots": local_screenshots,
+                "source_url": game_url
+            }
+            with open(metadata_path, "w", encoding="utf-8") as f:
+                json.dump(metadata, f, ensure_ascii=False, indent=2)
     return jsonify({"success": True})
 
 @app.route("/delete")
