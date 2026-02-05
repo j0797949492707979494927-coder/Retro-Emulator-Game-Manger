@@ -1,7 +1,7 @@
 from flask import Flask, jsonify, request, send_from_directory
 from bs4 import BeautifulSoup
 import json
-import os, re, urllib.parse, requests
+import os, re, shutil, urllib.parse, requests
 
 app = Flask(__name__, static_folder="ui", static_url_path="")
 
@@ -170,6 +170,15 @@ def parse_game(html, url):
 def sanitize_filename(name):
     return os.path.basename(name).replace(os.sep, "_")
 
+def load_local_metadata(metadata_path):
+    if not os.path.isfile(metadata_path):
+        return None
+    try:
+        with open(metadata_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except json.JSONDecodeError:
+        return None
+
 def download_screenshot(url, folder, index):
     if not url:
         return None
@@ -222,7 +231,10 @@ def download_rom():
     folder = os.path.join(ROM_DIR, console)
     os.makedirs(folder, exist_ok=True)
     safe_rom_name = sanitize_filename(rom_name)
-    file_path = os.path.join(folder, safe_rom_name)
+    base_name = os.path.splitext(safe_rom_name)[0]
+    game_folder = os.path.join(folder, base_name)
+    os.makedirs(game_folder, exist_ok=True)
+    file_path = os.path.join(game_folder, safe_rom_name)
 
     if not os.path.isfile(file_path):
         with requests.get(rom_url, headers={"User-Agent": "Mozilla/5.0"}, stream=True) as r:
@@ -239,16 +251,15 @@ def download_rom():
             game_data = None
 
         if game_data:
-            base_name = os.path.splitext(safe_rom_name)[0]
-            metadata_path = os.path.join(folder, f"{base_name}.json")
-            screenshots_dir = os.path.join(folder, f"{base_name}_screenshots")
+            metadata_path = os.path.join(game_folder, "metadata.json")
+            screenshots_dir = os.path.join(game_folder, "screenshots")
             os.makedirs(screenshots_dir, exist_ok=True)
 
             local_screenshots = []
             for index, screenshot_url in enumerate(game_data.get("screenshots", []), start=1):
                 filename = download_screenshot(screenshot_url, screenshots_dir, index)
                 if filename:
-                    local_screenshots.append(f"/roms/{console}/{os.path.basename(screenshots_dir)}/{filename}")
+                    local_screenshots.append(f"/roms/{console}/{base_name}/screenshots/{filename}")
 
             metadata = {
                 "rom": safe_rom_name,
@@ -266,10 +277,18 @@ def download_rom():
 def delete_rom():
     rom_name = request.args.get("filename")
     console = request.args.get("console", "misc")
-    file_path = os.path.join(ROM_DIR, console, rom_name)
-    if os.path.isfile(file_path):
-        os.remove(file_path)
-        return jsonify({"success": True})
+    game_dir = request.args.get("game")
+    if game_dir:
+        folder_path = os.path.join(ROM_DIR, console, sanitize_filename(game_dir))
+        if os.path.isdir(folder_path):
+            shutil.rmtree(folder_path)
+            return jsonify({"success": True})
+        return jsonify({"error":"Folder not found"}), 404
+    if rom_name:
+        file_path = os.path.join(ROM_DIR, console, rom_name)
+        if os.path.isfile(file_path):
+            os.remove(file_path)
+            return jsonify({"success": True})
     return jsonify({"error":"File not found"}), 404
 
 @app.route("/roms/<console>/<path:filename>")
@@ -285,9 +304,26 @@ def list_console():
     console = request.args.get("console", "misc")
     folder = os.path.join(ROM_DIR, console)
     if not os.path.isdir(folder):
-        return jsonify({"roms":[]})
-    roms = [f for f in os.listdir(folder) if os.path.isfile(os.path.join(folder,f))]
-    return jsonify({"roms": roms})
+        return jsonify({"roms": [], "games": []})
+    roms = [f for f in os.listdir(folder) if os.path.isfile(os.path.join(folder, f))]
+    games = []
+    for entry in sorted(os.listdir(folder)):
+        entry_path = os.path.join(folder, entry)
+        if not os.path.isdir(entry_path):
+            continue
+        metadata_path = os.path.join(entry_path, "metadata.json")
+        metadata = load_local_metadata(metadata_path)
+        rom_files = [f for f in os.listdir(entry_path) if os.path.isfile(os.path.join(entry_path, f)) and not f.endswith(".json")]
+        rom_file = rom_files[0] if rom_files else None
+        games.append({
+            "folder": entry,
+            "rom": rom_file,
+            "title": (metadata or {}).get("title") or entry,
+            "description": (metadata or {}).get("description"),
+            "info": (metadata or {}).get("info") or {},
+            "screenshots": (metadata or {}).get("screenshots") or []
+        })
+    return jsonify({"roms": roms, "games": games})
 
 @app.route("/proxy_image")
 def proxy_image():
