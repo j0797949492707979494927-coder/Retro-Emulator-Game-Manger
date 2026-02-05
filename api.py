@@ -8,6 +8,15 @@ app = Flask(__name__, static_folder="ui", static_url_path="")
 ROM_DIR = "roms"
 os.makedirs(ROM_DIR, exist_ok=True)
 
+THEGAMESDB_HEADERS = {"User-Agent": "Mozilla/5.0 (GameScraper/1.0)"}
+THEGAMESDB_PLATFORMS = {
+    "dendy": "7",
+    "snes": "6",
+    "n64": "3",
+    "ps1": "10",
+    "gba": "5",
+}
+
 # ------------------------------
 # Helper: GET with user-agent
 def curl_get(url):
@@ -196,6 +205,195 @@ def download_screenshot(url, folder, index):
         return None
     return filename
 
+def scrape_thegamesdb_details(game_url):
+    r = requests.get(game_url, headers=THEGAMESDB_HEADERS, timeout=10)
+    r.raise_for_status()
+    soup = BeautifulSoup(r.text, "html.parser")
+
+    data = {
+        "title": "",
+        "alternate_title": "",
+        "overview": "",
+        "platform": "",
+        "region": "",
+        "developer": "",
+        "publisher": "",
+        "release_date": "",
+        "players": "",
+        "coop": "",
+        "esrb_rating": "",
+        "genres": [],
+        "cover_front": "",
+        "cover_back": "",
+        "fanart": [],
+        "clearlogo": "",
+        "url": game_url
+    }
+
+    title_elem = soup.select_one(".card-header h1")
+    if title_elem:
+        data["title"] = title_elem.text.strip()
+
+    alt_title_elem = soup.select_one(".card-header h6.text-muted")
+    if alt_title_elem:
+        alt_text = alt_title_elem.text.strip()
+        if "Also know as:" in alt_text:
+            data["alternate_title"] = alt_text.replace("Also know as:", "").strip()
+
+    overview_elem = soup.select_one("p.game-overview")
+    if overview_elem:
+        data["overview"] = overview_elem.text.strip()
+
+    for body in soup.select(".card-body"):
+        for p in body.find_all("p"):
+            text = p.text.strip()
+            if text.startswith("Platform:"):
+                platform_link = p.find("a")
+                data["platform"] = platform_link.text.strip() if platform_link else ""
+            elif text.startswith("Region:"):
+                data["region"] = text.replace("Region:", "").strip()
+            elif text.startswith("Developer(s):"):
+                dev_link = p.find("a")
+                data["developer"] = dev_link.text.strip() if dev_link else ""
+            elif text.startswith("Publishers(s):"):
+                pub_link = p.find("a")
+                data["publisher"] = pub_link.text.strip() if pub_link else ""
+            elif text.startswith("ReleaseDate:"):
+                data["release_date"] = text.replace("ReleaseDate:", "").strip()
+            elif text.startswith("Players:"):
+                data["players"] = text.replace("Players:", "").strip()
+            elif text.startswith("Co-op:"):
+                data["coop"] = text.replace("Co-op:", "").strip()
+            elif text.startswith("ESRB Rating:"):
+                data["esrb_rating"] = text.replace("ESRB Rating:", "").strip()
+            elif text.startswith("Genre(s):"):
+                genres_text = text.replace("Genre(s):", "").strip()
+                data["genres"] = [g.strip() for g in genres_text.split("|") if g.strip()]
+
+    front_cover = soup.select_one('a[data-caption="Front Cover"]')
+    if front_cover and front_cover.get("href"):
+        data["cover_front"] = front_cover["href"]
+
+    back_cover = soup.select_one('a[data-caption="Back Cover"]')
+    if back_cover and back_cover.get("href"):
+        data["cover_back"] = back_cover["href"]
+
+    for fanart in soup.select('a[data-fancybox="fanarts"]'):
+        if fanart.get("href"):
+            data["fanart"].append(fanart["href"])
+
+    clearlogo = soup.select_one('a[data-fancybox="clearlogos"]')
+    if clearlogo and clearlogo.get("href"):
+        data["clearlogo"] = clearlogo["href"]
+
+    return data
+
+def search_thegamesdb(name, platform_id=None, limit=5):
+    params = {"name": name}
+    if platform_id:
+        params["platform_id[]"] = [platform_id]
+    r = requests.get("https://thegamesdb.net/search.php", headers=THEGAMESDB_HEADERS, params=params, timeout=10)
+    r.raise_for_status()
+    soup = BeautifulSoup(r.text, "html.parser")
+    results = []
+    for a in soup.select("a[href*='game.php?id=']")[:limit]:
+        game_id = a["href"].split("id=")[-1]
+        title_el = a.select_one(".card-footer p")
+        results.append({
+            "id": game_id,
+            "title": title_el.text.strip() if title_el else "No title",
+            "url": f"https://thegamesdb.net/game.php?id={game_id}"
+        })
+    return results
+
+def download_asset(url, folder, prefix):
+    if not url:
+        return None
+    parsed = urllib.parse.urlparse(url)
+    filename = os.path.basename(parsed.path) or f"{prefix}.jpg"
+    filename = sanitize_filename(filename)
+    file_path = os.path.join(folder, filename)
+    try:
+        with requests.get(url, headers=THEGAMESDB_HEADERS, stream=True, timeout=10) as r:
+            r.raise_for_status()
+            with open(file_path, "wb") as f:
+                for chunk in r.iter_content(8192):
+                    f.write(chunk)
+    except requests.RequestException:
+        return None
+    return filename
+
+def merge_metadata(existing, incoming):
+    merged = dict(existing or {})
+
+    def replace_if_longer(key, incoming_key=None):
+        src_key = incoming_key or key
+        incoming_value = (incoming or {}).get(src_key)
+        if not incoming_value:
+            return
+        current_value = merged.get(key, "")
+        if len(str(incoming_value)) > len(str(current_value or "")):
+            merged[key] = incoming_value
+        elif not current_value:
+            merged[key] = incoming_value
+
+    replace_if_longer("description", "overview")
+    replace_if_longer("overview")
+
+    for key in ("title", "alternate_title", "platform", "region", "developer",
+                "publisher", "release_date", "players", "coop", "esrb_rating", "url"):
+        if not merged.get(key) and (incoming or {}).get(key):
+            merged[key] = incoming[key]
+
+    merged["genres"] = sorted(set((merged.get("genres") or []) + (incoming or {}).get("genres", [])))
+
+    for key in ("cover_front", "cover_back", "clearlogo"):
+        if not merged.get(key) and (incoming or {}).get(key):
+            merged[key] = incoming[key]
+
+    merged["fanart"] = list(dict.fromkeys((merged.get("fanart") or []) + (incoming or {}).get("fanart", [])))
+    return merged
+
+def enrich_metadata(game_folder, base_name, console_id, seed_title=None):
+    metadata_path = os.path.join(game_folder, "metadata.json")
+    existing = load_local_metadata(metadata_path) or {}
+    title = seed_title or existing.get("title") or base_name
+    platform_id = THEGAMESDB_PLATFORMS.get(console_id)
+    try:
+        results = search_thegamesdb(title, platform_id=platform_id, limit=1)
+    except requests.RequestException:
+        return existing
+    if not results:
+        return existing
+
+    try:
+        incoming = scrape_thegamesdb_details(results[0]["url"])
+    except requests.RequestException:
+        return existing
+
+    merged = merge_metadata(existing, incoming)
+    assets_dir = os.path.join(game_folder, "assets")
+    os.makedirs(assets_dir, exist_ok=True)
+
+    for key, prefix in (("cover_front", "cover-front"), ("cover_back", "cover-back"), ("clearlogo", "clearlogo")):
+        url = merged.get(key)
+        if url:
+            filename = download_asset(url, assets_dir, prefix)
+            if filename:
+                merged[key] = f"/roms/{console_id}/{base_name}/assets/{filename}"
+
+    fanart_local = []
+    for index, url in enumerate(merged.get("fanart", []), start=1):
+        filename = download_asset(url, assets_dir, f"fanart-{index}")
+        if filename:
+            fanart_local.append(f"/roms/{console_id}/{base_name}/assets/{filename}")
+    if fanart_local:
+        merged["fanart"] = fanart_local
+
+    with open(metadata_path, "w", encoding="utf-8") as f:
+        json.dump(merged, f, ensure_ascii=False, indent=2)
+    return merged
+
 # ------------------------------
 # Routes
 @app.route("/")
@@ -269,8 +467,11 @@ def download_rom():
                 "screenshots": local_screenshots,
                 "source_url": game_url
             }
+            existing_metadata = load_local_metadata(metadata_path) or {}
+            merged = merge_metadata(existing_metadata, metadata)
             with open(metadata_path, "w", encoding="utf-8") as f:
-                json.dump(metadata, f, ensure_ascii=False, indent=2)
+                json.dump(merged, f, ensure_ascii=False, indent=2)
+            enrich_metadata(game_folder, base_name, console, seed_title=merged.get("title"))
     return jsonify({"success": True})
 
 @app.route("/delete")
@@ -320,8 +521,13 @@ def list_console():
             "rom": rom_file,
             "title": (metadata or {}).get("title") or entry,
             "description": (metadata or {}).get("description"),
+            "overview": (metadata or {}).get("overview"),
             "info": (metadata or {}).get("info") or {},
-            "screenshots": (metadata or {}).get("screenshots") or []
+            "screenshots": (metadata or {}).get("screenshots") or [],
+            "cover_front": (metadata or {}).get("cover_front"),
+            "cover_back": (metadata or {}).get("cover_back"),
+            "fanart": (metadata or {}).get("fanart") or [],
+            "clearlogo": (metadata or {}).get("clearlogo")
         })
     return jsonify({"roms": roms, "games": games})
 
