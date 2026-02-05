@@ -17,6 +17,11 @@ THEGAMESDB_PLATFORMS = {
     "gba": "5",
 }
 
+def has_cover_metadata(metadata):
+    if not metadata:
+        return False
+    return bool(metadata.get("cover_front") or metadata.get("clearlogo"))
+
 # ------------------------------
 # Helper: GET with user-agent
 def curl_get(url):
@@ -394,6 +399,27 @@ def enrich_metadata(game_folder, base_name, console_id, seed_title=None):
         json.dump(merged, f, ensure_ascii=False, indent=2)
     return merged
 
+def refresh_missing_covers(target_console=None):
+    updated = 0
+    skipped = 0
+    consoles = [target_console] if target_console else os.listdir(ROM_DIR)
+    for console_id in consoles:
+        console_path = os.path.join(ROM_DIR, console_id)
+        if not os.path.isdir(console_path):
+            continue
+        for entry in os.listdir(console_path):
+            entry_path = os.path.join(console_path, entry)
+            if not os.path.isdir(entry_path):
+                continue
+            metadata_path = os.path.join(entry_path, "metadata.json")
+            metadata = load_local_metadata(metadata_path)
+            if has_cover_metadata(metadata):
+                skipped += 1
+                continue
+            enrich_metadata(entry_path, entry, console_id, seed_title=(metadata or {}).get("title"))
+            updated += 1
+    return {"updated": updated, "skipped": skipped}
+
 # ------------------------------
 # Routes
 @app.route("/")
@@ -530,6 +556,12 @@ def list_console():
             "clearlogo": (metadata or {}).get("clearlogo")
         })
     return jsonify({"roms": roms, "games": games})
+
+@app.route("/refresh_covers")
+def refresh_covers():
+    console = request.args.get("console")
+    results = refresh_missing_covers(console)
+    return jsonify({"status": "ok", **results})
 
 @app.route("/proxy_image")
 def proxy_image():

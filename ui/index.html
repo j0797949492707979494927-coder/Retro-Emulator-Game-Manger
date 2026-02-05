@@ -460,7 +460,7 @@
                                         ${rom.local ? `
                                             <button class="px-5 py-2 bg-white/5 text-white/10 rounded-xl text-[9px] font-black uppercase tracking-widest cursor-not-allowed">LINKED</button>
                                         ` : `
-                                            <button onclick="handleDownloadROM('${rom.download_url}')" class="px-6 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-[9px] font-black uppercase tracking-widest transition-all">PULL ROM</button>
+                                            <button onclick="handleDownloadROM(this, '${rom.download_url}')" class="px-6 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-[9px] font-black uppercase tracking-widest transition-all">PULL ROM</button>
                                         `}
                                     </div>
                                 `).join('')}
@@ -640,10 +640,22 @@
 }
 
 
-        async function handleDownloadROM(url) {
-            await API.download(url);
-            showMarketGameDetails(state.lastGameUrl);
-            if (state.selectedConsole) loadLocalGames(state.selectedConsole.id);
+        async function handleDownloadROM(button, url) {
+            if (!button || button.disabled) return;
+            const originalText = button.textContent;
+            button.textContent = 'DOWNLOADING...';
+            button.disabled = true;
+            button.classList.add('cursor-wait', 'opacity-60');
+            try {
+                await API.download(url);
+                button.textContent = 'LINKED';
+                button.classList.add('cursor-not-allowed');
+                if (state.selectedConsole) loadLocalGames(state.selectedConsole.id);
+            } catch (e) {
+                button.textContent = originalText;
+                button.disabled = false;
+                button.classList.remove('cursor-wait', 'opacity-60');
+            }
         }
 
         async function handleDeleteROM(name, consoleId, isFolder = false) {
