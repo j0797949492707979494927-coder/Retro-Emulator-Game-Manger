@@ -126,6 +126,10 @@
                 <i data-lucide="shopping-bag" size="20"></i>
                 <span class="font-semibold text-sm">Marketplace</span>
             </button>
+            <button onclick="navTo('SETTINGS')" id="btn-settings" class="w-full flex items-center gap-4 px-4 py-3 rounded-xl transition-all text-white/40 hover:text-white hover:bg-white/5">
+                <i data-lucide="settings" size="20"></i>
+                <span class="font-semibold text-sm">Settings</span>
+            </button>
             <button class="w-full flex items-center gap-4 px-4 py-3 rounded-xl transition-all text-white/40 hover:text-white hover:bg-white/5">
                 <i data-lucide="star" size="20"></i>
                 <span class="font-semibold text-sm">Favorites</span>
@@ -216,6 +220,29 @@
             </div>
         </section>
 
+        <!-- Settings View -->
+        <section id="view-settings" class="hidden flex-1 p-8 overflow-y-auto custom-scroll view-section">
+            <div class="mb-8 animate-fade">
+                <h2 class="text-4xl font-black tracking-tighter mb-2 uppercase italic">SYSTEM <span class="text-blue-500">SETTINGS</span></h2>
+                <p class="text-white/30 text-xs font-medium uppercase tracking-widest">Configure stores, covers, and addons</p>
+            </div>
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div class="glass rounded-3xl p-6 border border-white/5 space-y-4">
+                    <h3 class="text-sm font-bold uppercase tracking-widest text-white/60">Marketplace Sources</h3>
+                    <div id="settings-stores" class="space-y-3 text-xs text-white/60"></div>
+                </div>
+                <div class="glass rounded-3xl p-6 border border-white/5 space-y-4">
+                    <h3 class="text-sm font-bold uppercase tracking-widest text-white/60">Cover Art Sources</h3>
+                    <div id="settings-covers" class="space-y-3 text-xs text-white/60"></div>
+                </div>
+                <div class="glass rounded-3xl p-6 border border-white/5 space-y-4 lg:col-span-2">
+                    <h3 class="text-sm font-bold uppercase tracking-widest text-white/60">Add-ons</h3>
+                    <p class="text-[11px] text-white/40">Drop addon folders into <span class="text-white/70">/addons</span> to extend functionality.</p>
+                    <div id="settings-addons" class="flex flex-wrap gap-2 text-[10px] uppercase"></div>
+                </div>
+            </div>
+        </section>
+
         <!-- Footer Bar -->
         <footer class="h-10 border-t border-white/5 flex items-center justify-between px-6 text-[9px] font-black uppercase tracking-[0.2em] text-white/20 bg-black/60">
             <div class="flex gap-6">
@@ -253,6 +280,8 @@
             getGame: (url) => fetch(`/game?url=${encodeURIComponent(url)}`).then(r => r.json()),
             getMarketCover: (title, console) => fetch(`/market_cover?title=${encodeURIComponent(title)}&console=${encodeURIComponent(console || '')}`).then(r => r.json()),
             listLocal: (console) => fetch(`/list_console?console=${console}`).then(r => r.json()),
+            listConsoles: () => fetch(`/list_consoles`).then(r => r.json()),
+            listAddons: () => fetch(`/addons`).then(r => r.json()),
             delete: (name, console, game) => {
                 const params = new URLSearchParams();
                 if (name) params.set('filename', name);
@@ -260,7 +289,8 @@
                 params.set('console', console);
                 return fetch(`/delete?${params.toString()}`).then(r => r.json());
             },
-            download: (url) => fetch(url),
+            download: (url) => fetch(url).then(r => r.json()),
+            downloadStatus: (jobId) => fetch(`/download_status?job_id=${encodeURIComponent(jobId)}`).then(r => r.json()),
             proxyImg: (url) => `/proxy_image?url=${encodeURIComponent(url)}`
         };
 
@@ -278,12 +308,13 @@
             lastGameUrl: "",
             isEmulating: false,
             localGames: [],
-            selectedLocalGame: null
+            selectedLocalGame: null,
+            consoles: []
         };
 
         function navTo(view) {
             state.view = view;
-            ['home', 'store', 'library', 'market-detail'].forEach(v => {
+            ['home', 'store', 'library', 'market-detail', 'settings'].forEach(v => {
                 const el = document.getElementById(`view-${v}`);
                 if (el) el.classList.add('hidden');
             });
@@ -292,11 +323,16 @@
 
             document.getElementById('btn-home').classList.remove('active-link');
             document.getElementById('btn-store').classList.remove('active-link');
+            document.getElementById('btn-settings').classList.remove('active-link');
             if (view === 'HOME') document.getElementById('btn-home').classList.add('active-link');
             if (view === 'STORE') document.getElementById('btn-store').classList.add('active-link');
+            if (view === 'SETTINGS') document.getElementById('btn-settings').classList.add('active-link');
 
             updateBreadcrumbs();
             updateGlow(view === 'STORE' || view === 'MARKET-DETAIL' ? '#8b5cf6' : '#3b82f6');
+            if (view === 'SETTINGS') {
+                renderSettings();
+            }
         }
 
         function updateBreadcrumbs() {
@@ -304,6 +340,7 @@
             let html = `<span class="text-white/40 cursor-pointer hover:text-white" onclick="navTo('HOME')">Dashboard</span>`;
             if (state.view === 'STORE') html += ` <i data-lucide="chevron-right" size="10" class="text-white/20"></i> <span class="text-white">Market</span>`;
             else if (state.view === 'MARKET-DETAIL') html += ` <i data-lucide="chevron-right" size="10" class="text-white/20"></i> <span class="text-white/40 cursor-pointer" onclick="navTo('STORE')">Market</span> <i data-lucide="chevron-right" size="10" class="text-white/20"></i> <span class="text-white">Detail</span>`;
+            else if (state.view === 'SETTINGS') html += ` <i data-lucide="chevron-right" size="10" class="text-white/20"></i> <span class="text-white">Settings</span>`;
             else if (state.selectedConsole) html += ` <i data-lucide="chevron-right" size="10" class="text-white/20"></i> <span class="text-white">${state.selectedConsole.name}</span>`;
             container.innerHTML = html;
             lucide.createIcons();
@@ -330,7 +367,8 @@
 
         function renderConsoles() {
             const grid = document.getElementById('console-grid');
-            grid.innerHTML = CONSOLES.map(c => `
+            const entries = state.consoles.length ? state.consoles : CONSOLES;
+            grid.innerHTML = entries.map(c => `
                 <div class="console-card group glass rounded-3xl p-5 cursor-pointer relative overflow-hidden h-56 flex flex-col justify-end border border-white/5" onclick="selectConsole('${c.id}')">
                     <img src="${c.img}" class="absolute inset-0 w-full h-full object-contain opacity-10 group-hover:opacity-20 transition-all -z-10 group-hover:scale-105 duration-500 p-8">
                     <div class="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent"></div>
@@ -346,8 +384,56 @@
             lucide.createIcons();
         }
 
+        async function loadConsoleList() {
+            try {
+                const response = await API.listConsoles();
+                const localConsoles = response.consoles || [];
+                const mapped = [...CONSOLES];
+                localConsoles.forEach(id => {
+                    if (mapped.some(c => c.id === id)) return;
+                    mapped.push({
+                        id,
+                        name: id.toUpperCase(),
+                        color: '#475569',
+                        icon: 'hard-drive',
+                        img: 'https://placehold.co/240x200/111/444?text=ROM'
+                    });
+                });
+                state.consoles = mapped;
+            } catch (e) {
+                state.consoles = CONSOLES;
+            }
+            renderConsoles();
+        }
+
+        function getSettings() {
+            const defaults = {
+                stores: {
+                    emuland: true,
+                    thegamesdb: true
+                },
+                coverSources: {
+                    emuland: true,
+                    thegamesdb: true
+                }
+            };
+            try {
+                const stored = JSON.parse(localStorage.getItem('settings') || '{}');
+                return {
+                    stores: { ...defaults.stores, ...(stored.stores || {}) },
+                    coverSources: { ...defaults.coverSources, ...(stored.coverSources || {}) }
+                };
+            } catch (e) {
+                return defaults;
+            }
+        }
+
+        function saveSettings(settings) {
+            localStorage.setItem('settings', JSON.stringify(settings));
+        }
+
         function selectConsole(id) {
-            state.selectedConsole = CONSOLES.find(c => c.id === id);
+            state.selectedConsole = state.consoles.find(c => c.id === id);
             navTo('LIBRARY');
             loadLocalGames(id);
         }
@@ -579,7 +665,7 @@
 
         // Emulator Logic
         function runGame(consoleId) {
-            const con = CONSOLES.find(c => c.id === consoleId);
+            const con = state.consoles.find(c => c.id === consoleId);
             if (!con || !state.selectedLocalGame || !state.selectedLocalGame.rom) return;
 
             const modal = document.getElementById('emulator-modal');
@@ -657,14 +743,83 @@
             button.disabled = true;
             button.classList.add('cursor-wait', 'opacity-60');
             try {
-                await API.download(url);
-                button.textContent = 'LINKED';
-                button.classList.add('cursor-not-allowed');
-                if (state.selectedConsole) loadLocalGames(state.selectedConsole.id);
+                const response = await API.download(url);
+                if (!response?.job_id) {
+                    throw new Error('Missing job id');
+                }
+                const jobId = response.job_id;
+                let finished = false;
+                while (!finished) {
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    const status = await API.downloadStatus(jobId);
+                    if (status?.job?.status === 'complete') {
+                        finished = true;
+                        button.textContent = 'LINKED';
+                        button.classList.add('cursor-not-allowed');
+                        if (state.selectedConsole) {
+                            await loadConsoleList();
+                            loadLocalGames(state.selectedConsole.id);
+                        } else {
+                            await loadConsoleList();
+                        }
+                    } else if (status?.job?.status === 'error') {
+                        throw new Error(status.job.error || 'Download failed');
+                    }
+                }
             } catch (e) {
                 button.textContent = originalText;
                 button.disabled = false;
                 button.classList.remove('cursor-wait', 'opacity-60');
+            }
+        }
+
+        async function renderSettings() {
+            const settings = getSettings();
+            const storeContainer = document.getElementById('settings-stores');
+            const coverContainer = document.getElementById('settings-covers');
+            const addonsContainer = document.getElementById('settings-addons');
+            storeContainer.innerHTML = '';
+            coverContainer.innerHTML = '';
+            addonsContainer.innerHTML = '';
+
+            Object.entries(settings.stores).forEach(([key, enabled]) => {
+                const row = document.createElement('label');
+                row.className = 'flex items-center justify-between bg-white/5 rounded-xl px-4 py-3 border border-white/5';
+                row.innerHTML = `
+                    <span class="uppercase tracking-widest">${key}</span>
+                    <input type="checkbox" class="accent-blue-500" ${enabled ? 'checked' : ''}>
+                `;
+                row.querySelector('input').addEventListener('change', (e) => {
+                    settings.stores[key] = e.target.checked;
+                    saveSettings(settings);
+                });
+                storeContainer.appendChild(row);
+            });
+
+            Object.entries(settings.coverSources).forEach(([key, enabled]) => {
+                const row = document.createElement('label');
+                row.className = 'flex items-center justify-between bg-white/5 rounded-xl px-4 py-3 border border-white/5';
+                row.innerHTML = `
+                    <span class="uppercase tracking-widest">${key}</span>
+                    <input type="checkbox" class="accent-blue-500" ${enabled ? 'checked' : ''}>
+                `;
+                row.querySelector('input').addEventListener('change', (e) => {
+                    settings.coverSources[key] = e.target.checked;
+                    saveSettings(settings);
+                });
+                coverContainer.appendChild(row);
+            });
+
+            const addons = await API.listAddons();
+            if (addons?.addons?.length) {
+                addons.addons.forEach(addon => {
+                    const badge = document.createElement('span');
+                    badge.className = 'px-3 py-1 rounded-full bg-white/5 border border-white/10 text-white/60';
+                    badge.textContent = addon;
+                    addonsContainer.appendChild(badge);
+                });
+            } else {
+                addonsContainer.innerHTML = '<span class="text-white/30">No addons found.</span>';
             }
         }
 
@@ -691,10 +846,11 @@
         document.getElementById('search-input').addEventListener('keypress', (e) => e.key === 'Enter' && doSearch());
 
         document.addEventListener('DOMContentLoaded', () => {
-            renderConsoles();
+            loadConsoleList();
             updateClock();
             setInterval(updateClock, 10000);
             updateBreadcrumbs();
+            renderSettings();
             const status = document.getElementById('system-status');
             setInterval(() => status.style.opacity = (status.style.opacity === '0.3' ? '1' : '0.3'), 1500);
         });

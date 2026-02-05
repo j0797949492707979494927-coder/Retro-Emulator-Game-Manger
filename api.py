@@ -1,12 +1,14 @@
 from flask import Flask, jsonify, request, send_from_directory
 from bs4 import BeautifulSoup
 import json
-import os, re, shutil, urllib.parse, requests
+import os, re, shutil, threading, urllib.parse, uuid, requests
 
 app = Flask(__name__, static_folder="ui", static_url_path="")
 
 ROM_DIR = "roms"
 os.makedirs(ROM_DIR, exist_ok=True)
+ADDONS_DIR = "addons"
+os.makedirs(ADDONS_DIR, exist_ok=True)
 
 THEGAMESDB_HEADERS = {"User-Agent": "Mozilla/5.0 (GameScraper/1.0)"}
 THEGAMESDB_PLATFORMS = {
@@ -21,6 +23,8 @@ def has_cover_metadata(metadata):
     if not metadata:
         return False
     return bool(metadata.get("cover_front") or metadata.get("clearlogo"))
+
+download_jobs = {}
 
 # ------------------------------
 # Helper: GET with user-agent
@@ -428,6 +432,65 @@ def refresh_missing_covers(target_console=None):
             updated += 1
     return {"updated": updated, "skipped": skipped}
 
+def list_consoles():
+    if not os.path.isdir(ROM_DIR):
+        return []
+    return sorted([name for name in os.listdir(ROM_DIR) if os.path.isdir(os.path.join(ROM_DIR, name))])
+
+def run_download_job(job_id, rom_url, rom_name, console, game_url):
+    download_jobs[job_id]["status"] = "downloading"
+    try:
+        folder = os.path.join(ROM_DIR, console)
+        os.makedirs(folder, exist_ok=True)
+        safe_rom_name = sanitize_filename(rom_name)
+        base_name = os.path.splitext(safe_rom_name)[0]
+        game_folder = os.path.join(folder, base_name)
+        os.makedirs(game_folder, exist_ok=True)
+        file_path = os.path.join(game_folder, safe_rom_name)
+
+        if not os.path.isfile(file_path):
+            with requests.get(rom_url, headers={"User-Agent": "Mozilla/5.0"}, stream=True) as r:
+                r.raise_for_status()
+                with open(file_path, "wb") as f:
+                    for chunk in r.iter_content(8192):
+                        f.write(chunk)
+
+        if game_url:
+            try:
+                html = curl_get(game_url)
+                game_data = parse_game(html, game_url)
+            except requests.RequestException:
+                game_data = None
+
+            if game_data:
+                metadata_path = os.path.join(game_folder, "metadata.json")
+                screenshots_dir = os.path.join(game_folder, "screenshots")
+                os.makedirs(screenshots_dir, exist_ok=True)
+
+                local_screenshots = []
+                for index, screenshot_url in enumerate(game_data.get("screenshots", []), start=1):
+                    filename = download_screenshot(screenshot_url, screenshots_dir, index)
+                    if filename:
+                        local_screenshots.append(f"/roms/{console}/{base_name}/screenshots/{filename}")
+
+                metadata = {
+                    "rom": safe_rom_name,
+                    "title": game_data.get("title"),
+                    "info": game_data.get("info", {}),
+                    "description": game_data.get("description"),
+                    "screenshots": local_screenshots,
+                    "source_url": game_url
+                }
+                existing_metadata = load_local_metadata(metadata_path) or {}
+                merged = merge_metadata(existing_metadata, metadata)
+                with open(metadata_path, "w", encoding="utf-8") as f:
+                    json.dump(merged, f, ensure_ascii=False, indent=2)
+                enrich_metadata(game_folder, base_name, console, seed_title=merged.get("title"))
+        download_jobs[job_id]["status"] = "complete"
+    except requests.RequestException as exc:
+        download_jobs[job_id]["status"] = "error"
+        download_jobs[job_id]["error"] = str(exc)
+
 # ------------------------------
 # Routes
 @app.route("/")
@@ -459,54 +522,15 @@ def download_rom():
     game_url = request.args.get("game_url")
     if not rom_url or not rom_name:
         return jsonify({"error": "Missing parameters"}), 400
-
-    folder = os.path.join(ROM_DIR, console)
-    os.makedirs(folder, exist_ok=True)
-    safe_rom_name = sanitize_filename(rom_name)
-    base_name = os.path.splitext(safe_rom_name)[0]
-    game_folder = os.path.join(folder, base_name)
-    os.makedirs(game_folder, exist_ok=True)
-    file_path = os.path.join(game_folder, safe_rom_name)
-
-    if not os.path.isfile(file_path):
-        with requests.get(rom_url, headers={"User-Agent": "Mozilla/5.0"}, stream=True) as r:
-            r.raise_for_status()
-            with open(file_path, "wb") as f:
-                for chunk in r.iter_content(8192):
-                    f.write(chunk)
-
-    if game_url:
-        try:
-            html = curl_get(game_url)
-            game_data = parse_game(html, game_url)
-        except requests.RequestException:
-            game_data = None
-
-        if game_data:
-            metadata_path = os.path.join(game_folder, "metadata.json")
-            screenshots_dir = os.path.join(game_folder, "screenshots")
-            os.makedirs(screenshots_dir, exist_ok=True)
-
-            local_screenshots = []
-            for index, screenshot_url in enumerate(game_data.get("screenshots", []), start=1):
-                filename = download_screenshot(screenshot_url, screenshots_dir, index)
-                if filename:
-                    local_screenshots.append(f"/roms/{console}/{base_name}/screenshots/{filename}")
-
-            metadata = {
-                "rom": safe_rom_name,
-                "title": game_data.get("title"),
-                "info": game_data.get("info", {}),
-                "description": game_data.get("description"),
-                "screenshots": local_screenshots,
-                "source_url": game_url
-            }
-            existing_metadata = load_local_metadata(metadata_path) or {}
-            merged = merge_metadata(existing_metadata, metadata)
-            with open(metadata_path, "w", encoding="utf-8") as f:
-                json.dump(merged, f, ensure_ascii=False, indent=2)
-            enrich_metadata(game_folder, base_name, console, seed_title=merged.get("title"))
-    return jsonify({"success": True})
+    job_id = str(uuid.uuid4())
+    download_jobs[job_id] = {"status": "queued", "error": None}
+    thread = threading.Thread(
+        target=run_download_job,
+        args=(job_id, rom_url, rom_name, console, game_url),
+        daemon=True
+    )
+    thread.start()
+    return jsonify({"success": True, "job_id": job_id})
 
 @app.route("/delete")
 def delete_rom():
@@ -565,11 +589,22 @@ def list_console():
         })
     return jsonify({"roms": roms, "games": games})
 
+@app.route("/list_consoles")
+def list_consoles_route():
+    return jsonify({"consoles": list_consoles()})
+
 @app.route("/refresh_covers")
 def refresh_covers():
     console = request.args.get("console")
     results = refresh_missing_covers(console)
     return jsonify({"status": "ok", **results})
+
+@app.route("/download_status")
+def download_status():
+    job_id = request.args.get("job_id")
+    if not job_id or job_id not in download_jobs:
+        return jsonify({"status": "error", "message": "Unknown job"}), 404
+    return jsonify({"status": "ok", "job": download_jobs[job_id]})
 
 @app.route("/market_cover")
 def market_cover():
@@ -582,6 +617,14 @@ def market_cover():
     except requests.RequestException:
         cover = None
     return jsonify({"status": "ok", "cover": cover})
+
+@app.route("/addons")
+def list_addons():
+    addons = []
+    for name in sorted(os.listdir(ADDONS_DIR)):
+        if os.path.isdir(os.path.join(ADDONS_DIR, name)):
+            addons.append(name)
+    return jsonify({"addons": addons})
 
 @app.route("/proxy_image")
 def proxy_image():
