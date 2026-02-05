@@ -1,0 +1,1230 @@
+--- FILE: api.py ---
+from flask import Flask, jsonify, request, send_from_directory
+from bs4 import BeautifulSoup
+import os, re, urllib.parse, requests
+
+app = Flask(__name__, static_folder="ui", static_url_path="")
+
+ROM_DIR = "roms"
+os.makedirs(ROM_DIR, exist_ok=True)
+
+# ------------------------------
+# Helper: GET with user-agent
+def curl_get(url):
+    headers = {"User-Agent": "Mozilla/5.0"}
+    return requests.get(url, headers=headers).text
+
+# ------------------------------
+# Helper: fix URLs for images
+def safe_url(url):
+    if not url:
+        return None
+    if url.startswith("//"):
+        url = "https:" + url
+    # Do NOT quote the path, just return as-is
+    return url
+
+# ------------------------------
+# Search page parser (corrected)
+def parse_search(html):
+    soup = BeautifulSoup(html, "html.parser")
+    games = []
+
+    for container in soup.select(".fcontainer"):
+        # ----- Extract console/handheld/arcade info -----
+        header_links = container.select(".fheader a")
+        console = None
+        console_slug = None
+
+        if header_links:
+            # Ignore the first "Consoles"/"Handhelds"/"Arcade"
+            for link in header_links[1:]:
+                text = link.text.strip()
+                href = link.get("href", "")
+                if "/roms" in href or "/games" in href:
+                    # Stop at the ROMs / Games link
+                    break
+                console = text
+                m = re.search(r"/(consoles|portable|arcade)/([^/]+)", href)
+                if m:
+                    console_slug = m.group(2)
+
+        # Fallback if console not found
+        if not console:
+            console = "Other"
+        if not console_slug:
+            console_slug = "other"
+
+        # ----- Each game inside this console -----
+        for p in container.select(".fllinks p"):
+            link_node = p.select_one("a")
+            img_node = p.select_one("img.preview")
+            small_nodes = p.select("small")
+
+            if not link_node:
+                continue
+
+            # Image
+            thumbnail_url = None
+            if img_node and img_node.get("src"):
+                src = img_node["src"]
+                if src.startswith("//"):
+                    thumbnail_url = "https:" + src
+                elif src.startswith("/"):
+                    thumbnail_url = "https://www.emu-land.net" + src
+                else:
+                    thumbnail_url = src
+
+            # Genre & players from <small> tags (if available)
+            genre = small_nodes[0].text.replace("|", "").strip() if len(small_nodes) > 0 else None
+            players = small_nodes[1].text.replace("|", "").strip() if len(small_nodes) > 1 else None
+
+            games.append({
+                "title": link_node.text.strip(),
+                "link": "https://www.emu-land.net" + link_node.get("href"),
+                "thumbnail": thumbnail_url,
+                "console": console,
+                "console_id": console_slug,
+                "genre": genre,
+                "players": players
+            })
+
+    return games
+
+
+
+
+# ------------------------------
+# Game page parser
+def parse_game(html, url):
+    soup = BeautifulSoup(html, "html.parser")
+    title_node = soup.select_one(".rheader h1")
+    info_nodes = soup.select("ul.finfo li")
+    screenshots = [safe_url(a.get("href")) for a in soup.select(".ss-area .item a") if a.get("href")]
+
+    game = {
+        "title": title_node.text.strip() if title_node else None,
+        "info": {},
+        "screenshots": screenshots,
+        "downloads": []
+    }
+
+    # Info fields
+    for li in info_nodes:
+        text = " ".join(li.text.split())
+        if "Genre:" in text: game["info"]["genre"] = text.replace("Genre:","").strip()
+        if "Players:" in text: game["info"]["players"] = text.replace("Players:","").strip()
+        if "Developer:" in text: game["info"]["developer"] = text.replace("Developer:","").strip()
+        if "Year of release:" in text: game["info"]["year"] = text.replace("Year of release:","").strip()
+        if "Published:" in text: game["info"]["publisher"] = text.replace("Published:","").strip()
+
+    # Extract console & game ID
+    console_match = re.search(r"/consoles/([^/]+)/roms", url)
+    console = console_match.group(1) if console_match else "misc"
+
+    id_match = re.search(r"id=(\d+)", html)
+    if not id_match:
+        id_match = re.search(r"-(\d+)$", url)
+    game_id = id_match.group(1) if id_match else None
+
+    folder = os.path.join(ROM_DIR, console)
+    os.makedirs(folder, exist_ok=True)
+
+    # Fetch ROM download links
+    if game_id:
+        mfl_url = f"https://www.emu-land.net/en/consoles/{console}/roms?act=getmfl&id={game_id}"
+        mfl_html = curl_get(mfl_url)
+        soup_dl = BeautifulSoup(mfl_html, "html.parser")
+        for a in soup_dl.select(".file a"):
+            rom_name = a.text.strip()
+            local_path = os.path.join(folder, rom_name)
+            if os.path.isfile(local_path):
+                game["downloads"].append({
+                    "name": rom_name,
+                    "local": True,
+                    "path": f"/roms/{console}/{urllib.parse.quote(rom_name)}"
+                })
+            else:
+                rom_url = "https://www.emu-land.net" + a.get("href")
+                game["downloads"].append({
+                    "name": rom_name,
+                    "local": False,
+                    "download_url": f"/download?url={urllib.parse.quote(rom_url)}&filename={urllib.parse.quote(rom_name)}&console={console}"
+                })
+
+    return game
+
+# ------------------------------
+# Routes
+@app.route("/")
+def index():
+    return send_from_directory("ui", "index.html")
+
+@app.route("/search")
+def search():
+    q = request.args.get("q", "").strip()
+    url = f"https://www.emu-land.net/en/search_games?id=all&genre=--&players=--&q={q}"
+    html = curl_get(url)
+    games = parse_search(html)
+    return jsonify({"status":"ok","games":games})
+
+@app.route("/game")
+def game_page():
+    url = request.args.get("url")
+    if not url:
+        return jsonify({"status":"error","message":"Missing URL"}), 400
+    html = curl_get(url)
+    game = parse_game(html, url)
+    return jsonify({"status":"ok","game":game})
+
+@app.route("/download")
+def download_rom():
+    rom_url = request.args.get("url")
+    rom_name = request.args.get("filename")
+    console = request.args.get("console", "misc")
+    if not rom_url or not rom_name:
+        return jsonify({"error": "Missing parameters"}), 400
+
+    folder = os.path.join(ROM_DIR, console)
+    os.makedirs(folder, exist_ok=True)
+    file_path = os.path.join(folder, rom_name)
+
+    if not os.path.isfile(file_path):
+        with requests.get(rom_url, headers={"User-Agent": "Mozilla/5.0"}, stream=True) as r:
+            r.raise_for_status()
+            with open(file_path, "wb") as f:
+                for chunk in r.iter_content(8192):
+                    f.write(chunk)
+    return jsonify({"success": True})
+
+@app.route("/delete")
+def delete_rom():
+    rom_name = request.args.get("filename")
+    console = request.args.get("console", "misc")
+    file_path = os.path.join(ROM_DIR, console, rom_name)
+    if os.path.isfile(file_path):
+        os.remove(file_path)
+        return jsonify({"success": True})
+    return jsonify({"error":"File not found"}), 404
+
+@app.route("/roms/<console>/<path:filename>")
+def serve_rom(console, filename):
+    return send_from_directory(os.path.join(ROM_DIR, console), filename)
+
+@app.route("/<path:path>")
+def static_files(path):
+    return send_from_directory("ui", path)
+
+@app.route("/list_console")
+def list_console():
+    console = request.args.get("console", "misc")
+    folder = os.path.join(ROM_DIR, console)
+    if not os.path.isdir(folder):
+        return jsonify({"roms":[]})
+    roms = [f for f in os.listdir(folder) if os.path.isfile(os.path.join(folder,f))]
+    return jsonify({"roms": roms})
+
+@app.route("/proxy_image")
+def proxy_image():
+    img_url = request.args.get("url")
+    if not img_url:
+        return "Missing URL", 400
+
+    img_url = safe_url(img_url)  # <-- use safe_url here too
+
+    headers = {"User-Agent": "Mozilla/5.0"}
+    r = requests.get(img_url, headers=headers, stream=True)
+    if r.status_code != 200:
+        return "Image not found", 404
+
+    content_type = r.headers.get("Content-Type", "image/jpeg")
+    return r.content, 200, {"Content-Type": content_type}
+
+
+--- FILE: app.py ---
+import sys, threading
+from PySide6.QtWidgets import QApplication
+from PySide6.QtWebEngineWidgets import QWebEngineView
+from PySide6.QtCore import QUrl
+from api import app as flask_app
+
+# Start Flask backend in background
+threading.Thread(target=lambda: flask_app.run(port=5000, debug=False, use_reloader=False), daemon=True).start()
+
+# Start Qt WebEngine frontend
+qt_app = QApplication(sys.argv)
+view = QWebEngineView()
+view.setWindowTitle("Emulation Center - PS3 Style")
+view.resize(1280, 720)
+view.load(QUrl("http://localhost:5000"))
+view.show()
+
+sys.exit(qt_app.exec())
+
+
+--- FILE: requirements.txt ---
+PySide6
+Flask
+requests
+beautifulsoup4
+PyQtWebEngine
+
+--- FILE: roms\snes\index.html ---
+<html>
+    <head>
+        <!--HTML file auto generated using EmulatorJS codehelper-->
+        <style>
+            body, html {
+                margin: 0;
+                padding: 0;
+            }
+        </style>
+    </head>
+    <body>
+        <div style="width:100%;height:100%;max-width:100%">
+            <div id="game"></div>
+        </div>
+        <script>
+            EJS_player = "#game";
+            EJS_core = "snes";
+            EJS_gameName = "Name of game";
+            EJS_AdUrl = "ad url ";
+            EJS_color = "#0064ff";
+            EJS_startOnLoaded = true;
+            EJS_pathtodata = "Localpath/";
+            EJS_gameUrl = "Donkey Kong Country (USA) (Rev 2).sfc";
+        </script>
+        <script src="Localpath/loader.js"></script>
+    </body>
+</html>
+
+--- FILE: ui\index.html ---
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NovaArcade | Emulation Center</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --accent: #3b82f6;
+            --bg: #050507;
+            --panel: rgba(255, 255, 255, 0.03);
+            --border: rgba(255, 255, 255, 0.08);
+        }
+
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background-color: var(--bg);
+            color: #ffffff;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        .glass {
+            background: var(--panel);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--border);
+        }
+
+        .active-link {
+            background: rgba(59, 130, 246, 0.15);
+            color: #60a5fa;
+            border-left: 3px solid #3b82f6;
+        }
+
+        .custom-scroll::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        .custom-scroll::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .custom-scroll::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+        }
+
+        .view-section {
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .console-card, .game-card {
+            transition: transform 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease;
+        }
+
+        .console-card:hover, .game-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 10px 30px -15px rgba(59, 130, 246, 0.4);
+            border-color: rgba(59, 130, 246, 0.3);
+        }
+
+        .bg-glow {
+            position: fixed;
+            inset: 0;
+            z-index: -1;
+            background: radial-gradient(circle at top right, rgba(59, 130, 246, 0.1), transparent 60%);
+            filter: blur(80px);
+            transition: background 1s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(5px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .animate-fade {
+            animation: fadeIn 0.3s ease forwards;
+        }
+
+        /* Emulator Modal */
+        #emulator-modal {
+            background: #000;
+            z-index: 1000;
+            display: none;
+        }
+
+        .emulator-container {
+            width: 100%;
+            height: 100%;
+        }
+    </style>
+</head>
+<body class="flex h-screen overflow-hidden">
+
+    <div id="glow-layer" class="bg-glow"></div>
+
+    <!-- Sidebar -->
+    <aside class="w-64 h-full glass border-r border-white/5 flex flex-col z-50">
+        <div class="p-8 flex items-center gap-3">
+            <div class="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center shadow-lg shadow-blue-600/20">
+                <i data-lucide="zap" class="text-white fill-white"></i>
+            </div>
+            <h1 class="text-xl font-extrabold tracking-tight uppercase italic">NOVA<span class="text-blue-500">ARCADE</span></h1>
+        </div>
+
+        <nav class="flex-1 px-4 space-y-2">
+            <button onclick="navTo('HOME')" id="btn-home" class="w-full flex items-center gap-4 px-4 py-3 rounded-xl transition-all active-link">
+                <i data-lucide="layout-grid" size="20"></i>
+                <span class="font-semibold text-sm">Dashboard</span>
+            </button>
+            <button onclick="navTo('STORE')" id="btn-store" class="w-full flex items-center gap-4 px-4 py-3 rounded-xl transition-all text-white/40 hover:text-white hover:bg-white/5 group">
+                <i data-lucide="shopping-bag" size="20"></i>
+                <span class="font-semibold text-sm">Marketplace</span>
+            </button>
+            <button class="w-full flex items-center gap-4 px-4 py-3 rounded-xl transition-all text-white/40 hover:text-white hover:bg-white/5">
+                <i data-lucide="star" size="20"></i>
+                <span class="font-semibold text-sm">Favorites</span>
+            </button>
+            <button class="w-full flex items-center gap-4 px-4 py-3 rounded-xl transition-all text-white/40 hover:text-white hover:bg-white/5">
+                <i data-lucide="clock" size="20"></i>
+                <span class="font-semibold text-sm">Recent</span>
+            </button>
+        </nav>
+
+        <div class="p-6">
+            <div class="bg-white/5 rounded-2xl p-4 flex items-center gap-3 border border-white/5">
+                <img src="https://api.dicebear.com/7.x/pixel-art/svg?seed=arcade" class="w-10 h-10 rounded-full bg-blue-500/20" alt="Avatar">
+                <div class="overflow-hidden">
+                    <p class="text-xs font-bold truncate">ADMIN_CORE</p>
+                    <p class="text-[10px] text-blue-400 font-bold uppercase tracking-widest">Active</p>
+                </div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="flex-1 flex flex-col relative">
+        
+        <!-- Header -->
+        <header class="h-16 px-8 flex items-center justify-between border-b border-white/5 z-40 bg-black/10 backdrop-blur-sm">
+            <div id="breadcrumb" class="flex items-center gap-3 text-xs font-bold uppercase tracking-widest">
+                <span class="text-white/40">Dashboard</span>
+            </div>
+
+            <div class="flex items-center gap-6">
+                <div class="relative group">
+                    <i data-lucide="search" size="16" class="absolute left-3 top-1/2 -translate-y-1/2 text-white/30"></i>
+                    <input id="search-input" type="text" placeholder="Global Search..." 
+                           class="bg-white/5 border border-white/5 rounded-full py-2 pl-10 pr-4 text-[11px] w-64 focus:outline-none focus:border-blue-500/50 transition-all font-medium">
+                </div>
+                <div id="current-time" class="text-[11px] font-bold tracking-widest text-white/40">00:00</div>
+            </div>
+        </header>
+
+        <!-- Home View -->
+        <section id="view-home" class="flex-1 p-8 overflow-y-auto custom-scroll view-section">
+            <div class="mb-8 animate-fade">
+                <h2 class="text-4xl font-black tracking-tighter mb-2 uppercase italic">SYSTEM <span class="text-blue-500">CORES</span></h2>
+                <p class="text-white/30 text-xs font-medium uppercase tracking-widest">Select hardware to access local library</p>
+            </div>
+            <div id="console-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+                <!-- Consoles injected here -->
+            </div>
+        </section>
+
+        <!-- Store View (Search Results) -->
+        <section id="view-store" class="hidden flex-1 p-8 overflow-y-auto custom-scroll view-section">
+            <div class="mb-8 animate-fade">
+                <h2 class="text-4xl font-black tracking-tighter mb-1 italic uppercase">MARKET <span class="text-blue-500">RESULTS</span></h2>
+                <p id="search-status" class="text-white/30 text-[10px] font-bold uppercase tracking-[0.2em]">Idle</p>
+            </div>
+            <div id="store-sections" class="space-y-10">
+                <!-- Grouped search results injected here -->
+            </div>
+        </section>
+
+        <!-- Market Detail View (Compact Full Page) -->
+        <section id="view-market-detail" class="hidden flex-1 p-8 overflow-y-auto custom-scroll view-section bg-gradient-to-br from-transparent to-blue-900/5">
+            <div id="market-detail-container" class="max-w-7xl mx-auto animate-fade">
+                <!-- Compact detail for market game -->
+            </div>
+        </section>
+
+        <!-- Library View (Local) -->
+        <section id="view-library" class="hidden flex-1 flex overflow-hidden view-section">
+            <div class="w-72 h-full border-r border-white/5 flex flex-col bg-black/20">
+                <div class="p-6 border-b border-white/5 flex justify-between items-center bg-black/20">
+                    <h3 class="text-[10px] font-black uppercase tracking-widest text-white/30" id="library-title">Vault</h3>
+                    <div id="local-count" class="text-[9px] font-black text-blue-500 bg-blue-500/10 px-2 py-0.5 rounded">0</div>
+                </div>
+                <div id="local-list" class="flex-1 overflow-y-auto custom-scroll p-3 space-y-1">
+                    <!-- Local games injected here -->
+                </div>
+            </div>
+            <div class="flex-1 overflow-y-auto custom-scroll p-10">
+                <div id="library-detail-container" class="max-w-4xl animate-fade">
+                    <div class="h-full flex flex-col items-center justify-center text-white/10 text-center space-y-4 py-20">
+                        <i data-lucide="gamepad-2" size="48" class="opacity-10"></i>
+                        <p class="text-[10px] font-black uppercase tracking-widest italic">Select local module</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Footer Bar -->
+        <footer class="h-10 border-t border-white/5 flex items-center justify-between px-6 text-[9px] font-black uppercase tracking-[0.2em] text-white/20 bg-black/60">
+            <div class="flex gap-6">
+                <span>VER: 2.5.4-STABLE</span>
+                <span id="system-status" class="text-green-500/50">● ENGINE_READY</span>
+            </div>
+            <div class="flex gap-4">
+                <span class="flex items-center gap-1.5"><kbd class="bg-white/5 px-1.5 py-0.5 rounded border border-white/10 text-[7px]">ENTER</kbd> SELECT</span>
+                <span class="flex items-center gap-1.5"><kbd class="bg-white/5 px-1.5 py-0.5 rounded border border-white/10 text-[7px]">ESC</kbd> BACK</span>
+            </div>
+        </footer>
+    </main>
+
+    <!-- Emulator Modal -->
+    <div id="emulator-modal" class="fixed inset-0 hidden flex flex-col">
+        <div class="h-12 bg-black flex items-center justify-between px-6 border-b border-white/10">
+            <div class="flex items-center gap-3">
+                <div class="w-6 h-6 bg-blue-600 rounded flex items-center justify-center">
+                    <i data-lucide="gamepad-2" size="14"></i>
+                </div>
+                <span id="emulating-title" class="text-[10px] font-black uppercase tracking-widest text-white/50">EMULATION_CORE_ACTIVE</span>
+            </div>
+            <button onclick="closeEmulator()" class="text-white/40 hover:text-red-500 transition-colors flex items-center gap-2 text-[10px] font-black uppercase">
+                TERMINATE CORE <i data-lucide="x" size="14"></i>
+            </button>
+        </div>
+        <div class="flex-1 overflow-hidden relative" id="emulator-target">
+            <!-- EmulatorJS will inject here -->
+        </div>
+    </div>
+
+    <script>
+        const API = {
+            search: (q) => fetch(`/search?q=${encodeURIComponent(q)}`).then(r => r.json()),
+            getGame: (url) => fetch(`/game?url=${encodeURIComponent(url)}`).then(r => r.json()),
+            listLocal: (console) => fetch(`/list_console?console=${console}`).then(r => r.json()),
+            delete: (name, console) => fetch(`/delete?filename=${encodeURIComponent(name)}&console=${encodeURIComponent(console)}`).then(r => r.json()),
+            download: (url) => fetch(url),
+            proxyImg: (url) => `/proxy_image?url=${encodeURIComponent(url)}`
+        };
+
+        const CONSOLES = [
+            { id: 'dendy', name: 'NES Classic', color: '#ef4444', icon: 'gamepad-2', img: 'https://i.imgur.com/OzB5tOq.png', core: 'nes' },
+            { id: 'snes', name: 'Super NES', color: '#8b5cf6', icon: 'joystick', img: 'https://i.imgur.com/wK6sR8Q.png', core: 'snes' },
+            { id: 'n64', name: 'Nintendo 64', color: '#4b5563', icon: 'diamond', img: 'https://i.imgur.com/VqN9F6A.png', core: 'n64' },
+            { id: 'ps1', name: 'PlayStation', color: '#3b82f6', icon: 'disc', img: 'https://i.imgur.com/4Uj2GyX.png', core: 'psx' },
+            { id: 'gba', name: 'GameBoy Adv', color: '#6366f1', icon: 'smartphone', img: 'https://i.imgur.com/yMjF94b.png', core: 'gba' }
+        ];
+
+        let state = {
+            view: 'HOME',
+            selectedConsole: null,
+            lastGameUrl: "",
+            isEmulating: false
+        };
+
+        function navTo(view) {
+            state.view = view;
+            ['home', 'store', 'library', 'market-detail'].forEach(v => {
+                const el = document.getElementById(`view-${v}`);
+                if (el) el.classList.add('hidden');
+            });
+            const target = document.getElementById(`view-${view.toLowerCase()}`);
+            if (target) target.classList.remove('hidden');
+
+            document.getElementById('btn-home').classList.remove('active-link');
+            document.getElementById('btn-store').classList.remove('active-link');
+            if (view === 'HOME') document.getElementById('btn-home').classList.add('active-link');
+            if (view === 'STORE') document.getElementById('btn-store').classList.add('active-link');
+
+            updateBreadcrumbs();
+            updateGlow(view === 'STORE' || view === 'MARKET-DETAIL' ? '#8b5cf6' : '#3b82f6');
+        }
+
+        function updateBreadcrumbs() {
+            const container = document.getElementById('breadcrumb');
+            let html = `<span class="text-white/40 cursor-pointer hover:text-white" onclick="navTo('HOME')">Dashboard</span>`;
+            if (state.view === 'STORE') html += ` <i data-lucide="chevron-right" size="10" class="text-white/20"></i> <span class="text-white">Market</span>`;
+            else if (state.view === 'MARKET-DETAIL') html += ` <i data-lucide="chevron-right" size="10" class="text-white/20"></i> <span class="text-white/40 cursor-pointer" onclick="navTo('STORE')">Market</span> <i data-lucide="chevron-right" size="10" class="text-white/20"></i> <span class="text-white">Detail</span>`;
+            else if (state.selectedConsole) html += ` <i data-lucide="chevron-right" size="10" class="text-white/20"></i> <span class="text-white">${state.selectedConsole.name}</span>`;
+            container.innerHTML = html;
+            lucide.createIcons();
+        }
+
+        function updateGlow(color) {
+            document.getElementById('glow-layer').style.background = `radial-gradient(circle at top right, ${color}15, transparent 60%)`;
+        }
+
+        function renderConsoles() {
+            const grid = document.getElementById('console-grid');
+            grid.innerHTML = CONSOLES.map(c => `
+                <div class="console-card group glass rounded-3xl p-5 cursor-pointer relative overflow-hidden h-56 flex flex-col justify-end border border-white/5" onclick="selectConsole('${c.id}')">
+                    <img src="${c.img}" class="absolute inset-0 w-full h-full object-contain opacity-10 group-hover:opacity-20 transition-all -z-10 group-hover:scale-105 duration-500 p-8">
+                    <div class="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent"></div>
+                    <div class="relative z-10">
+                        <div class="w-10 h-10 rounded-xl flex items-center justify-center mb-3" style="background-color: ${c.color}">
+                            <i data-lucide="${c.icon}" size="18" class="text-white"></i>
+                        </div>
+                        <h3 class="text-base font-bold">${c.name}</h3>
+                        <p class="text-[9px] text-white/30 uppercase tracking-[0.2em] font-black italic">Library Access</p>
+                    </div>
+                </div>
+            `).join('');
+            lucide.createIcons();
+        }
+
+        function selectConsole(id) {
+            state.selectedConsole = CONSOLES.find(c => c.id === id);
+            navTo('LIBRARY');
+            loadLocalGames(id);
+        }
+
+        async function doSearch() {
+            const q = document.getElementById('search-input').value;
+            if (!q) return;
+
+            navTo('STORE');
+            const sectionsContainer = document.getElementById('store-sections');
+            const status = document.getElementById('search-status');
+            
+            sectionsContainer.innerHTML = `<div class="py-20 text-center font-black text-white/10 italic animate-pulse uppercase tracking-[0.3em]">Querying Network Archive...</div>`;
+            status.textContent = `SEARCHING: "${q.toUpperCase()}"`;
+
+            try {
+                const data = await API.search(q);
+                if (!data.games || data.games.length === 0) {
+                    sectionsContainer.innerHTML = `<div class="py-20 text-center font-black text-white/10 italic uppercase tracking-[0.2em]">Zero results found in global cache.</div>`;
+                    return;
+                }
+
+                const grouped = {};
+                data.games.forEach(g => {
+                    const key = g.console || "OTHERS";
+                    if (!grouped[key]) grouped[key] = [];
+                    grouped[key].push(g);
+                });
+
+                sectionsContainer.innerHTML = Object.entries(grouped).map(([consoleName, games]) => `
+                    <div class="animate-fade">
+                        <h3 class="text-[10px] font-black italic text-blue-500 uppercase tracking-[0.4em] mb-4 border-b border-blue-500/10 pb-2">${consoleName} <span class="text-white/20 ml-2">(${games.length})</span></h3>
+                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+                            ${games.map(game => `
+                                <div class="game-card glass rounded-2xl p-4 flex flex-col h-72 relative overflow-hidden group border border-white/5 cursor-pointer" onclick="showMarketGameDetails('${game.link}')">
+                                    <div class="w-full h-36 bg-black/40 rounded-xl mb-3 overflow-hidden relative">
+                                        <img src="${game.thumbnail ? API.proxyImg(game.thumbnail) : 'https://placehold.co/400x300/111/555?text=No+Boxart'}" 
+                                             class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500">
+                                    </div>
+                                    <h4 class="text-xs font-bold truncate mb-1 uppercase tracking-tight">${game.title}</h4>
+                                    <p class="text-[9px] text-white/20 uppercase font-black tracking-widest mt-auto italic">${game.players || '1-Player'}</p>
+                                    <div class="mt-2">
+                                        <button class="w-full py-2 bg-white/5 group-hover:bg-blue-600 text-[9px] font-black uppercase tracking-widest transition-all rounded-lg group-hover:text-white text-white/40">Details</button>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `).join('');
+                lucide.createIcons();
+            } catch (e) {
+                sectionsContainer.innerHTML = `<div class="py-20 text-center text-red-500/40 italic font-black uppercase tracking-widest text-xs">Search interface disconnected.</div>`;
+            }
+        }
+
+        async function showMarketGameDetails(url) {
+            state.lastGameUrl = url;
+            navTo('MARKET-DETAIL');
+            const container = document.getElementById('market-detail-container');
+            container.innerHTML = `<div class="h-64 flex items-center justify-center font-black italic text-white/10 animate-pulse text-sm uppercase tracking-[0.3em]">Synchronizing Asset Data...</div>`;
+            
+            try {
+                const data = await API.getGame(url);
+                const game = data.game;
+                
+                const infoHtml = Object.entries(game.info).map(([k, v]) => `
+                    <div class="flex justify-between items-center text-[10px] py-1.5 border-b border-white/5">
+                        <span class="text-white/30 uppercase font-black tracking-widest">${k}</span>
+                        <span class="font-bold text-white/60">${v}</span>
+                    </div>`).join('');
+
+                container.innerHTML = `
+                    <div class="flex gap-10 items-start">
+                        <div class="w-64 space-y-4 flex-shrink-0">
+                            <div class="w-full h-80 bg-black/60 rounded-3xl border border-white/10 overflow-hidden shadow-2xl">
+                                <img src="${game.thumbnail ? API.proxyImg(game.thumbnail) : 'https://placehold.co/400x600/111/555?text=N/A'}" class="w-full h-full object-cover">
+                            </div>
+                            <div class="p-5 glass rounded-2xl border border-white/5">
+                                <h5 class="text-[9px] font-black text-white/20 uppercase tracking-[0.2em] mb-3 italic">Hardware Specs</h5>
+                                <div class="space-y-1">${infoHtml}</div>
+                            </div>
+                        </div>
+
+                        <div class="flex-1 space-y-6">
+                            <div>
+                                <div class="flex gap-2 mb-3">
+                                    <span class="bg-blue-600 px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest shadow-lg shadow-blue-600/20">${game.console || 'CORE'}</span>
+                                    <span class="bg-white/10 px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest text-white/40">${game.players || 'Single'}</span>
+                                </div>
+                                <h1 class="text-5xl font-black tracking-tighter uppercase italic text-white mb-4 leading-none">${game.title}</h1>
+                                
+                                <div class="flex gap-2 overflow-x-auto pb-4 custom-scroll mb-4">
+                                    ${game.screenshots.map(ss => `<img src="${API.proxyImg(ss)}" class="h-24 rounded-xl border border-white/10 hover:border-blue-500/40 transition-all cursor-pointer">`).join('') || '<p class="text-[10px] text-white/10 italic">No media assets detected.</p>'}
+                                </div>
+                            </div>
+
+                            <div class="space-y-2">
+                                <h4 class="text-[11px] font-black uppercase italic text-blue-500 tracking-[0.2em] mb-4">ARCHIVE FILES</h4>
+                                ${game.downloads.map(rom => `
+                                    <div class="p-4 glass rounded-2xl flex items-center justify-between border border-white/5 hover:bg-white/5 transition-all">
+                                        <div class="flex items-center gap-4">
+                                            <div class="w-8 h-8 bg-blue-500/10 rounded-lg flex items-center justify-center text-blue-500">
+                                                <i data-lucide="download" size="14"></i>
+                                            </div>
+                                            <div>
+                                                <p class="font-bold text-[12px] uppercase">${rom.name}</p>
+                                                <p class="text-[8px] text-white/20 uppercase font-black tracking-widest">${rom.local ? 'LOCAL VAULT' : 'NETWORK SERVER'}</p>
+                                            </div>
+                                        </div>
+                                        ${rom.local ? `
+                                            <button class="px-5 py-2 bg-white/5 text-white/10 rounded-xl text-[9px] font-black uppercase tracking-widest cursor-not-allowed">LINKED</button>
+                                        ` : `
+                                            <button onclick="handleDownloadROM('${rom.download_url}')" class="px-6 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-[9px] font-black uppercase tracking-widest transition-all">PULL ROM</button>
+                                        `}
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    </div>
+                `;
+                lucide.createIcons();
+            } catch (e) {
+                container.innerHTML = `<div class="py-20 text-center text-red-500 italic font-black text-sm uppercase">Interface Synchro Error.</div>`;
+            }
+        }
+
+        async function loadLocalGames(consoleId) {
+            const list = document.getElementById('local-list');
+            const countLabel = document.getElementById('local-count');
+            const libTitle = document.getElementById('library-title');
+            
+            const con = CONSOLES.find(c => c.id === consoleId);
+            libTitle.textContent = con ? con.name : 'Vault';
+            list.innerHTML = `<div class="p-6 text-center text-[10px] font-black text-white/10 animate-pulse italic uppercase tracking-widest">Scanning...</div>`;
+            
+            try {
+                const data = await API.listLocal(consoleId);
+                const roms = data.roms || [];
+                countLabel.textContent = roms.length;
+                
+                if (roms.length === 0) {
+                    list.innerHTML = `<div class="p-8 text-center glass rounded-2xl border border-dashed border-white/5 text-[9px] font-black uppercase text-white/10 italic">Empty Archive</div>`;
+                    return;
+                }
+
+                list.innerHTML = roms.map(name => `
+                    <div class="p-3 rounded-xl flex items-center justify-between group transition-all cursor-pointer hover:bg-white/5 border border-transparent" 
+                         onclick="selectLocalGame('${name}', '${consoleId}')">
+                        <div class="flex items-center gap-2 overflow-hidden">
+                            <i data-lucide="file-code" size="12" class="text-blue-500/40"></i>
+                            <p class="text-[11px] font-bold truncate text-white/50 group-hover:text-white transition-colors uppercase italic">${name}</p>
+                        </div>
+                        <button onclick="event.stopPropagation(); handleDeleteROM('${name}', '${consoleId}')" class="opacity-0 group-hover:opacity-100 p-1.5 hover:text-red-500 transition-all">
+                            <i data-lucide="x" size="12"></i>
+                        </button>
+                    </div>
+                `).join('');
+                lucide.createIcons();
+            } catch (e) {
+                list.innerHTML = `<div class="p-4 text-red-500/40 italic text-[10px] uppercase">Disk error.</div>`;
+            }
+        }
+
+        function selectLocalGame(name, consoleId) {
+            const container = document.getElementById('library-detail-container');
+            document.querySelectorAll('#local-list > div').forEach(el => el.classList.toggle('bg-blue-600/10', el.querySelector('p')?.textContent === name));
+
+            container.innerHTML = `
+                <div class="animate-fade">
+                    <div class="flex items-start gap-10">
+                        <div class="w-48 h-64 bg-black/40 rounded-3xl flex items-center justify-center border border-white/10 flex-shrink-0">
+                            <i data-lucide="cpu" size="48" class="text-white/10"></i>
+                        </div>
+                        <div class="flex-1">
+                            <span class="bg-blue-600/10 text-blue-400 border border-blue-500/20 px-3 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest inline-block mb-3">Local Module</span>
+                            <h1 class="text-4xl font-black tracking-tighter uppercase italic mb-6 border-b border-white/5 pb-4">${name}</h1>
+                            
+                            <div class="grid grid-cols-2 gap-4">
+                                <div class="p-5 glass rounded-2xl border border-white/5">
+                                    <h4 class="text-[10px] font-black uppercase italic mb-3 text-white/40">Engine Control</h4>
+                                    <div class="flex gap-2">
+                                        <button onclick="runGame('${name}', '${consoleId}')" class="flex-1 py-3 bg-blue-600 hover:bg-blue-500 rounded-xl font-black text-[10px] uppercase tracking-widest shadow-lg shadow-blue-600/20 transition-all flex items-center justify-center gap-2">
+                                            <i data-lucide="play" size="14"></i> Run core
+                                        </button>
+                                        <button onclick="handleDeleteROM('${name}', '${consoleId}')" class="w-12 h-12 glass hover:bg-red-500/10 hover:text-red-500 rounded-xl flex items-center justify-center transition-all">
+                                            <i data-lucide="trash-2" size="16"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="p-5 glass rounded-2xl border border-white/5 space-y-2">
+                                    <div class="flex justify-between text-[10px] uppercase font-black"><span class="text-white/20 tracking-widest">Hardware</span> <span class="text-white/60">${consoleId}</span></div>
+                                    <div class="flex justify-between text-[10px] uppercase font-black"><span class="text-white/20 tracking-widest">Status</span> <span class="text-green-500">Verified</span></div>
+                                    <div class="flex justify-between text-[10px] uppercase font-black"><span class="text-white/20 tracking-widest">Protocol</span> <span class="text-white/60">Local</span></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            lucide.createIcons();
+        }
+
+        // Emulator Logic
+        function runGame(name, consoleId) {
+            const con = CONSOLES.find(c => c.id === consoleId);
+            if (!con) return;
+
+            const modal = document.getElementById('emulator-modal');
+            const target = document.getElementById('emulator-target');
+            const title = document.getElementById('emulating-title');
+            
+            title.textContent = `RUNNING: ${name.toUpperCase()} (${con.name})`;
+            modal.style.display = 'flex';
+            target.innerHTML = `<div id="game-player" class="emulator-container"></div>`;
+
+            // EmulatorJS Configuration
+            window.EJS_player = '#game-player';
+            window.EJS_core = con.core;
+            window.EJS_gameUrl = `/roms/${consoleId}/${encodeURIComponent(name)}`;
+            window.EJS_pathtodata = 'https://cdn.emulatorjs.org/stable/data/';
+            window.EJS_startOnLoaded = true; // Automatically start loading without extra "Start Game" button
+            window.EJS_AdUrl = ''; // Ensure no ad behavior
+            
+            // Clean up any existing scripts to avoid duplicates
+            const existingScript = document.getElementById('ejs-loader');
+            if (existingScript) existingScript.remove();
+
+            const script = document.createElement('script');
+            script.id = 'ejs-loader';
+            script.src = 'https://cdn.emulatorjs.org/stable/data/loader.js';
+            document.body.appendChild(script);
+            
+            state.isEmulating = true;
+        }
+
+        function closeEmulator() {
+    const modal = document.getElementById('emulator-modal');
+    const target = document.getElementById('emulator-target');
+
+    // Kill everything inside
+    target.innerHTML = '';
+
+    // Kill all audio contexts (brute force)
+    if (window.AudioContext || window.webkitAudioContext) {
+        try {
+            document.querySelectorAll('audio, video').forEach(el => {
+                el.pause();
+                el.src = '';
+                el.load();
+            });
+        } catch (e) {}
+    }
+
+    // Remove EmulatorJS globals
+    delete window.EJS_player;
+    delete window.EJS_core;
+    delete window.EJS_gameUrl;
+    delete window.EJS_emulator;
+
+    // Remove loader script
+    const script = document.getElementById('ejs-loader');
+    if (script) script.remove();
+
+    modal.style.display = 'none';
+    state.isEmulating = false;
+
+    // 💀 Nuclear option: reset DOM node entirely
+    const fresh = document.createElement('div');
+    fresh.id = 'emulator-target';
+    fresh.className = 'flex-1 overflow-hidden relative';
+    modal.replaceChild(fresh, modal.children[1]);
+}
+
+
+        async function handleDownloadROM(url) {
+            await API.download(url);
+            showMarketGameDetails(state.lastGameUrl);
+            if (state.selectedConsole) loadLocalGames(state.selectedConsole.id);
+        }
+
+        async function handleDeleteROM(name, consoleId) {
+            await API.delete(name, consoleId);
+            if (state.view === 'LIBRARY') {
+                loadLocalGames(consoleId);
+                document.getElementById('library-detail-container').innerHTML = `<div class="h-full flex flex-col items-center justify-center text-white/10 text-center py-20 uppercase italic tracking-widest text-[9px]">Module Purged.</div>`;
+            } else if (state.view === 'MARKET-DETAIL') {
+                showMarketGameDetails(state.lastGameUrl);
+            }
+        }
+
+        function updateClock() {
+            const now = new Date();
+            document.getElementById('current-time').textContent = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+        }
+
+        document.getElementById('search-input').addEventListener('keypress', (e) => e.key === 'Enter' && doSearch());
+
+        document.addEventListener('DOMContentLoaded', () => {
+            renderConsoles();
+            updateClock();
+            setInterval(updateClock, 10000);
+            updateBreadcrumbs();
+            const status = document.getElementById('system-status');
+            setInterval(() => status.style.opacity = (status.style.opacity === '0.3' ? '1' : '0.3'), 1500);
+        });
+    </script>
+</body>
+</html>
+
+
+--- FILE: ui\script.js ---
+window.lastGameUrl = "";
+
+async function doSearch() {
+    const q = document.getElementById("search").value;
+    const res = await fetch(`/search?q=${encodeURIComponent(q)}`);
+    const data = await res.json();
+    const container = document.getElementById("games");
+
+    container.innerHTML = "";
+
+    if (!data.games || data.games.length === 0) {
+        container.innerHTML = "<p>No games found.</p>";
+        return;
+    }
+
+    // -----------------------------
+    // Group games by console
+    const grouped = {};
+    for (const game of data.games) {
+        const key = game.console || "Other";
+        if (!grouped[key]) grouped[key] = [];
+        grouped[key].push(game);
+    }
+
+    // -----------------------------
+    // Render each console section
+    for (const consoleName in grouped) {
+        // Section wrapper
+        const section = document.createElement("div");
+        section.className = "console-section";
+
+        // Console title
+        const header = document.createElement("h2");
+        header.className = "console-header";
+        header.textContent = consoleName;
+        section.appendChild(header);
+
+        // Game grid
+        const grid = document.createElement("div");
+        grid.className = "console-grid";
+
+        for (const game of grouped[consoleName]) {
+            const div = document.createElement("div");
+            div.className = "game";
+
+            div.innerHTML = `
+                <img src="${game.thumbnail ? `/proxy_image?url=${encodeURIComponent(game.thumbnail)}` : 'placeholder.png'}">
+                <div class="title">${game.title}</div>
+                <div class="platform">
+                    ${game.players ? game.players : ""}
+                </div>
+            `;
+
+            div.onclick = () => showGame(game.link);
+            grid.appendChild(div);
+        }
+
+        section.appendChild(grid);
+        container.appendChild(section);
+    }
+}
+
+
+async function showGame(url) {
+    window.lastGameUrl = url;
+    const res = await fetch(`/game?url=${encodeURIComponent(url)}`);
+    const data = await res.json();
+    const game = data.game;
+    const container = document.getElementById("games");
+    container.innerHTML = `<h2>${game.title}</h2>`;
+
+    // Screenshots
+    if(game.screenshots.length){
+        const ssDiv = document.createElement("div");
+        ssDiv.style.display = "flex";
+        ssDiv.style.gap = "10px";
+        game.screenshots.forEach(ss => {
+    const img = document.createElement("img");
+    img.src = `/proxy_image?url=${encodeURIComponent(ss)}`;
+    img.style.height = "120px";
+    ssDiv.appendChild(img);
+});
+
+        container.appendChild(ssDiv);
+    }
+
+    // Info
+    const infoDiv = document.createElement("div");
+    infoDiv.style.margin = "10px 0";
+    for(const key in game.info){
+        const p = document.createElement("p");
+        p.textContent = `${key}: ${game.info[key]}`;
+        infoDiv.appendChild(p);
+    }
+    container.appendChild(infoDiv);
+
+    // Downloads
+    game.downloads.forEach(rom => {
+        const div = document.createElement("div");
+        div.style.marginBottom = "10px";
+        if(rom.local){
+            div.innerHTML = `${rom.name} - <button onclick="deleteROM('${rom.name}', '${rom.path.split('/')[2]}')">Delete</button>`;
+        } else {
+            div.innerHTML = `${rom.name} - <button onclick="downloadROM('${rom.download_url}')">Download</button>`;
+        }
+        container.appendChild(div);
+    });
+}
+
+async function downloadROM(url){
+    await fetch(url);
+    showGame(window.lastGameUrl);
+}
+
+async function deleteROM(name, console){
+    await fetch(`/delete?filename=${encodeURIComponent(name)}&console=${encodeURIComponent(console)}`);
+    showGame(window.lastGameUrl);
+}
+
+// Console menu navigation
+document.querySelectorAll("#consoleMenu .item").forEach(item=>{
+    item.onclick = ()=>{
+        document.querySelectorAll("#consoleMenu .item").forEach(i=>i.classList.remove("active"));
+        item.classList.add("active");
+    };
+});
+
+
+// Track selected console
+let selectedConsole = null;
+
+document.querySelectorAll("#consoleMenu .item").forEach(item=>{
+    item.onclick = ()=>{
+        document.querySelectorAll("#consoleMenu .item").forEach(i=>i.classList.remove("active"));
+        item.classList.add("active");
+        selectedConsole = item.getAttribute("data-console");
+        loadLocalGames(selectedConsole);
+    };
+});
+
+// Load local ROMs for a console
+async function loadLocalGames(console){
+    const res = await fetch(`/roms/${console}/`);
+    const container = document.getElementById("games");
+    container.innerHTML = `<h2>${console.toUpperCase()} - Local Games</h2>`;
+    
+    // Since Flask cannot list directories via /roms/, we'll fetch from backend API
+    const apiRes = await fetch(`/list_console?console=${console}`);
+    const data = await apiRes.json();
+    if(!data.roms || data.roms.length === 0){
+        container.innerHTML += "<p>No games downloaded yet.</p>";
+        return;
+    }
+
+    data.roms.forEach(name=>{
+        const div = document.createElement("div");
+        div.className = "game";
+        div.innerHTML = `
+            <div class="title">${name}</div>
+            <button onclick="deleteROM('${name}','${console}')">Delete</button>
+        `;
+        container.appendChild(div);
+    });
+}
+
+
+--- FILE: ui\style.css ---
+body {
+    margin: 0;
+    background: linear-gradient(#0b153a,#000);
+    color: #fff;
+    font-family: Arial, sans-serif;
+}
+
+#topbar {
+    padding: 20px;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    background: rgba(0,0,0,0.5);
+}
+
+#search {
+    width: 300px;
+    padding: 8px;
+    font-size: 16px;
+    border-radius: 6px;
+    border: none;
+}
+
+#consoleMenu {
+    display: flex;
+    gap: 15px;
+    padding: 10px 20px;
+    overflow-x: auto;
+    background: rgba(255,255,255,0.05);
+}
+
+#consoleMenu .item {
+    flex: 0 0 auto;
+    text-align: center;
+    cursor: pointer;
+    padding: 5px;
+    border-radius: 6px;
+    transition: background .2s, transform .2s;
+}
+
+#consoleMenu .item.active,
+#consoleMenu .item:hover {
+    background: rgba(0,150,255,0.3);
+    transform: scale(1.05);
+}
+
+#consoleMenu .item img {
+    height: 50px;
+    margin-bottom: 5px;
+}
+
+#games {
+    display: flex;
+    flex-direction: column;
+    gap: 50px;
+    padding: 20px;
+}
+
+
+.game {
+    background: rgba(255,255,255,0.08);
+    border-radius: 14px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 10px;
+    cursor: pointer;
+    transition: transform .15s, box-shadow .15s;
+}
+
+.game:hover {
+    transform: scale(1.08);
+    box-shadow: 0 0 20px rgba(0,150,255,.5);
+}
+
+.game img {
+    max-width: 160px;
+    max-height: 140px;
+    object-fit: contain;
+}
+
+.game .title {
+    margin-top: 8px;
+    font-size: 14px;
+    text-align: center;
+    font-weight: bold;
+}
+
+.platform {
+    font-size: 12px;
+    opacity: 0.8;
+}
+
+button {
+    padding: 4px 8px;
+    margin-left: 5px;
+    border-radius: 4px;
+    border: none;
+    cursor: pointer;
+    transition: background .2s;
+}
+
+button:hover {
+    background: rgba(0,150,255,0.5);
+}
+
+
+.console-section {
+    margin-bottom: 40px;
+}
+
+.console-header {
+    grid-column: 1 / -1;
+    font-size: 22px;
+    margin: 10px 0 15px 10px;
+    color: #6fc3ff;
+    text-shadow: 0 0 8px rgba(0,150,255,0.6);
+}
+
+.console-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 18px;
+}
+
+
+--- UNREADABLE FILES ---
+roms\dendy\Dr. Mario (Europe).zip
+roms\dendy\Kou Dai Bao Shi - Hong (NJ002) (Ch).zip
+roms\jaguar\Flashback - The Quest for Identity (World) (En,Fr).zip
+roms\n64\Dr. Mario 64 (USA).zip
+roms\snes\Donkey Kong Country (USA) (Rev 2).sfc
+roms\snes\Donkey Kong Country (USA) (Rev 2).zip
+__pycache__\api.cpython-314.pyc
