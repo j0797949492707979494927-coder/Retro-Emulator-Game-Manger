@@ -117,9 +117,14 @@ def parse_game(html, url):
         if "Year of release:" in text: game["info"]["year"] = text.replace("Year of release:","").strip()
         if "Published:" in text: game["info"]["publisher"] = text.replace("Published:","").strip()
 
-    # Extract console & game ID
-    console_match = re.search(r"/consoles/([^/]+)/roms", url)
-    console = console_match.group(1) if console_match else "misc"
+    # Extract console/category & game ID
+    console_match = re.search(r"/(consoles|portable|arcade)/([^/]+)/roms", url)
+    if console_match:
+        category = console_match.group(1)
+        console = console_match.group(2)
+    else:
+        category = "consoles"
+        console = "misc"
 
     id_match = re.search(r"id=(\d+)", html)
     if not id_match:
@@ -131,7 +136,7 @@ def parse_game(html, url):
 
     # Fetch ROM download links
     if game_id:
-        mfl_url = f"https://www.emu-land.net/en/consoles/{console}/roms?act=getmfl&id={game_id}"
+        mfl_url = f"https://www.emu-land.net/en/{category}/{console}/roms?act=getmfl&id={game_id}"
         mfl_html = curl_get(mfl_url)
         soup_dl = BeautifulSoup(mfl_html, "html.parser")
         for a in soup_dl.select(".file a"):

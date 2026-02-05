@@ -64,6 +64,15 @@
             border-color: rgba(59, 130, 246, 0.3);
         }
 
+        .media-loading {
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .media-loaded {
+            opacity: 1;
+        }
+
         .bg-glow {
             position: fixed;
             inset: 0;
@@ -295,6 +304,20 @@
             document.getElementById('glow-layer').style.background = `radial-gradient(circle at top right, ${color}15, transparent 60%)`;
         }
 
+        function prepareMedia(container) {
+            if (!container) return;
+            container.querySelectorAll('img').forEach(img => {
+                img.classList.add('media-loading');
+                const finalize = () => img.classList.add('media-loaded');
+                if (img.complete) {
+                    finalize();
+                } else {
+                    img.addEventListener('load', finalize, { once: true });
+                    img.addEventListener('error', finalize, { once: true });
+                }
+            });
+        }
+
         function renderConsoles() {
             const grid = document.getElementById('console-grid');
             grid.innerHTML = CONSOLES.map(c => `
@@ -365,6 +388,7 @@
                     </div>
                 `).join('');
                 lucide.createIcons();
+                prepareMedia(sectionsContainer);
             } catch (e) {
                 sectionsContainer.innerHTML = `<div class="py-20 text-center text-red-500/40 italic font-black uppercase tracking-widest text-xs">Search interface disconnected.</div>`;
             }
@@ -436,6 +460,7 @@
                     </div>
                 `;
                 lucide.createIcons();
+                prepareMedia(container);
             } catch (e) {
                 container.innerHTML = `<div class="py-20 text-center text-red-500 italic font-black text-sm uppercase">Interface Synchro Error.</div>`;
             }
