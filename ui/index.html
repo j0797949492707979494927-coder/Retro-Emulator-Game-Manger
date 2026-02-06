@@ -600,6 +600,8 @@
             loadLocalGames(id);
         }
 
+        let storeRenderToken = 0;
+
         async function doSearch() {
             const q = document.getElementById('search-input').value;
             if (!q) return;
@@ -607,12 +609,14 @@
             navTo('STORE');
             const sectionsContainer = document.getElementById('store-sections');
             const status = document.getElementById('search-status');
+            const renderToken = ++storeRenderToken;
             
             sectionsContainer.innerHTML = `<div class="py-20 text-center font-black text-white/10 italic animate-pulse uppercase tracking-[0.3em]">Querying Network Archive...</div>`;
             status.textContent = `SEARCHING: "${q.toUpperCase()}"`;
 
             try {
                 const data = await API.search(q);
+                if (renderToken !== storeRenderToken) return;
                 if (!data.games || data.games.length === 0) {
                     sectionsContainer.innerHTML = `<div class="py-20 text-center font-black text-white/10 italic uppercase tracking-[0.2em]">Zero results found in global cache.</div>`;
                     return;
@@ -625,7 +629,8 @@
                     grouped[key].push(g);
                 });
 
-                sectionsContainer.innerHTML = Object.entries(grouped).map(([consoleName, games]) => {
+                const consoleEntries = Object.entries(grouped);
+                sectionsContainer.innerHTML = consoleEntries.map(([consoleName, games], index) => {
                     const consoleIcon = getConsoleIcon(consoleName);
                     const header = consoleIcon
                         ? `<div class="flex items-center gap-2"><img src="${consoleIcon}" class="w-5 h-5 object-contain opacity-80"> <span>${consoleName}</span></div>`
@@ -633,11 +638,11 @@
                     return `
                         <div class="animate-fade">
                             <h3 class="text-[10px] font-black italic text-blue-500 uppercase tracking-[0.4em] mb-4 border-b border-blue-500/10 pb-2">${header} <span class="text-white/20 ml-2">(${games.length})</span></h3>
-                            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+                            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4" id="console-grid-${index}">
                                 ${games.map(game => `
                                     <div class="game-card glass rounded-2xl p-4 flex flex-col h-72 relative overflow-hidden group border border-white/5 cursor-pointer" onclick="showMarketGameDetails('${game.link}')">
                                         <div class="w-full h-36 bg-black/40 rounded-xl mb-3 overflow-hidden relative">
-                                            <img src="${game.thumbnail ? API.proxyImg(game.thumbnail) : 'https://placehold.co/400x300/111/555?text=No+Boxart'}" 
+                                            <img src="${game.thumbnail ? API.proxyImg(game.thumbnail) : 'https://placehold.co/400x300/111/555?text=No+Boxart'}" loading="lazy"
                                                  class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500">
                                         </div>
                                         <h4 class="text-xs font-bold truncate mb-1 uppercase tracking-tight">${game.title}</h4>
@@ -652,7 +657,10 @@
                     `;
                 }).join('');
                 lucide.createIcons();
-                prepareMedia(sectionsContainer);
+                consoleEntries.forEach((_, index) => {
+                    const grid = document.getElementById(`console-grid-${index}`);
+                    if (grid) prepareMedia(grid);
+                });
             } catch (e) {
                 sectionsContainer.innerHTML = `<div class="py-20 text-center text-red-500/40 italic font-black uppercase tracking-widest text-xs">Search interface disconnected.</div>`;
             }
