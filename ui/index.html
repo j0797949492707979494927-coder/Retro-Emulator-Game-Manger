@@ -54,6 +54,11 @@
             scrollbar-gutter: stable;
         }
 
+        .stable-select {
+            height: 2rem;
+            max-width: 220px;
+        }
+
         .view-section {
             transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
         }
@@ -312,7 +317,8 @@
             { id: 'genesis', name: 'Sega Genesis', color: '#f97316', icon: 'bolt', img: 'https://placehold.co/320x240/111/444?text=Genesis', core: 'segaMD' },
             { id: 'megadrive', name: 'Sega Mega Drive', color: '#f97316', icon: 'bolt', img: 'https://placehold.co/320x240/111/444?text=Mega+Drive', core: 'segaMD' },
             { id: 'ps1', name: 'PlayStation', color: '#3b82f6', icon: 'disc', img: 'https://i.imgur.com/4Uj2GyX.png', core: 'psx' },
-            { id: 'gba', name: 'GameBoy Adv', color: '#6366f1', icon: 'smartphone', img: 'https://i.imgur.com/yMjF94b.png', core: 'gba' }
+            { id: 'gba', name: 'GameBoy Adv', color: '#6366f1', icon: 'smartphone', img: 'https://i.imgur.com/yMjF94b.png', core: 'gba' },
+            { id: 'psp', name: 'PlayStation Portable', color: '#64748b', icon: 'gamepad-2', img: 'https://placehold.co/320x240/111/444?text=PSP', core: 'psp' }
         ];
 
 
@@ -362,7 +368,25 @@
             genesis: 'segaMD',
             megadrive: 'segaMD',
             ps1: 'psx',
-            gba: 'gba'
+            gba: 'gba',
+            psp: 'psp',
+            nds: 'nds',
+            gb: 'gb',
+            sega32x: 'sega32x',
+            segams: 'segaMS',
+            segagg: 'segaGG',
+            segacd: 'segaCD',
+            segasaturn: 'segaSaturn',
+            jaguar: 'jaguar',
+            lynx: 'lynx',
+            atari2600: 'atari2600',
+            atari7800: 'atari7800',
+            '3do': '_3do',
+            pce: 'pce',
+            pcfx: 'pcfx',
+            ngp: 'ngp',
+            ws: 'ws',
+            dos: 'dos'
         };
         const CONSOLE_ICON_INDEX = [
             { label: 'GoldstarLG 3DO', path: 'Icons/Consoles/3DO/GoldstarLG 3DO.png' },
@@ -574,6 +598,16 @@
             return EMULATORJS_CORES[family] || [];
         }
 
+        function inferEmulatorJsCore(consoleId, fallbackCore) {
+            if (fallbackCore) return fallbackCore;
+            const family = CONSOLE_CORE_FAMILIES[consoleId];
+            const options = family ? (EMULATORJS_CORES[family] || []) : [];
+            if (family === '_3do') return '3do';
+            if (family) return family;
+            if (options.length) return options[0];
+            return null;
+        }
+
         function renderConsoles() {
             const grid = document.getElementById('console-grid');
             const entries = state.consoles.length ? state.consoles : CONSOLES;
@@ -607,7 +641,8 @@
                         name: id.toUpperCase(),
                         color: '#475569',
                         icon: 'hard-drive',
-                        img: 'https://placehold.co/240x200/111/444?text=ROM'
+                        img: 'https://placehold.co/240x200/111/444?text=ROM',
+                        core: inferEmulatorJsCore(id, null)
                     });
                 });
                 state.consoles = mapped;
@@ -954,7 +989,9 @@
                 // EmulatorJS Configuration
                 const selectedCore = settings.emulatorJsCores?.[consoleId];
                 window.EJS_player = '#game-player';
-                window.EJS_core = con.core;
+                const resolvedCore = inferEmulatorJsCore(consoleId, con.core);
+                if (!resolvedCore) { alert('No EmulatorJS core mapped for this console yet.'); return; }
+                window.EJS_core = resolvedCore;
                 window.EJS_gameUrl = `/roms/${consoleId}/${encodeURIComponent(state.selectedLocalGame.folder)}/${encodeURIComponent(state.selectedLocalGame.rom)}`;
                 window.EJS_pathtodata = 'https://cdn.emulatorjs.org/stable/data/';
                 window.EJS_startOnLoaded = true; // Automatically start loading without extra "Start Game" button
@@ -1114,7 +1151,7 @@
                 providerWrap.className = 'flex items-center justify-between gap-2';
                 providerWrap.innerHTML = `
                     <span class="text-[10px] uppercase text-white/40">Provider</span>
-                    <select class="bg-black/40 border border-white/10 rounded-lg px-2 py-1 text-[10px] uppercase">
+                    <select size="1" class="stable-select bg-black/40 border border-white/10 rounded-lg px-2 py-1 text-[10px] uppercase">
                         <option value="emulatorjs">EmulatorJS</option>
                         <option value="neptunjs">NeptunJS</option>
                     </select>
@@ -1124,7 +1161,6 @@
                 providerSelect.addEventListener('change', (e) => {
                     settings.emulators[consoleEntry.id] = e.target.value;
                     saveSettings(settings);
-                    renderSettings();
                 });
                 row.appendChild(providerWrap);
 
@@ -1134,7 +1170,7 @@
                     coreWrap.className = 'flex items-center justify-between gap-2';
                     coreWrap.innerHTML = `
                         <span class="text-[10px] uppercase text-white/40">Core</span>
-                        <select class="bg-black/40 border border-white/10 rounded-lg px-2 py-1 text-[10px] uppercase"></select>
+                        <select size="1" class="stable-select bg-black/40 border border-white/10 rounded-lg px-2 py-1 text-[10px] uppercase"></select>
                     `;
                     const coreSelect = coreWrap.querySelector('select');
                     coreSelect.innerHTML = `<option value="">Default</option>` + coreOptions.map(core => `<option value="${core}">${core}</option>`).join('');
