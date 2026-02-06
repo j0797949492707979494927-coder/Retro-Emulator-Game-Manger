@@ -50,6 +50,10 @@
             border-radius: 10px;
         }
 
+        .settings-scroll {
+            scrollbar-gutter: stable;
+        }
+
         .view-section {
             transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
         }
@@ -221,7 +225,7 @@
         </section>
 
         <!-- Settings View -->
-        <section id="view-settings" class="hidden flex-1 p-8 overflow-y-auto custom-scroll view-section">
+        <section id="view-settings" class="hidden flex-1 p-8 overflow-y-auto custom-scroll view-section settings-scroll">
             <div class="mb-8 animate-fade">
                 <h2 class="text-4xl font-black tracking-tighter mb-2 uppercase italic">SYSTEM <span class="text-blue-500">SETTINGS</span></h2>
                 <p class="text-white/30 text-xs font-medium uppercase tracking-widest">Configure stores, covers, and addons</p>
@@ -308,6 +312,117 @@
             { id: 'gba', name: 'GameBoy Adv', color: '#6366f1', icon: 'smartphone', img: 'https://i.imgur.com/yMjF94b.png', core: 'gba' }
         ];
 
+        const CONSOLE_ICON_INDEX = [
+            { label: 'GoldstarLG 3DO', path: 'Icons/Consoles/3DO/GoldstarLG 3DO.png' },
+            { label: 'MiscOther 3DO', path: 'Icons/Consoles/3DO/MiscOther 3DO.png' },
+            { label: 'Panasonic 3DO', path: 'Icons/Consoles/3DO/Panasonic 3DO.png' },
+            { label: 'Sanyo 3DO', path: 'Icons/Consoles/3DO/Sanyo 3DO.png' },
+            { label: 'Atari 2600', path: 'Icons/Consoles/Atari/Atari 2600.png' },
+            { label: 'Atari 5200', path: 'Icons/Consoles/Atari/Atari 5200.png' },
+            { label: 'Atari 7800', path: 'Icons/Consoles/Atari/Atari 7800.png' },
+            { label: 'Atari C-XXX', path: 'Icons/Consoles/Atari/Atari C-XXX.png' },
+            { label: 'Atari Jaguar CD', path: 'Icons/Consoles/Atari/Atari Jaguar CD.png' },
+            { label: 'Atari Jaguar', path: 'Icons/Consoles/Atari/Atari Jaguar.png' },
+            { label: 'Atari Lynx', path: 'Icons/Consoles/Atari/Atari Lynx.png' },
+            { label: 'Atari XEGS', path: 'Icons/Consoles/Atari/Atari XEGS.png' },
+            { label: 'LCD Solarpower', path: 'Icons/Consoles/Bandai/LCD Solarpower.png' },
+            { label: 'Pippin', path: 'Icons/Consoles/Bandai/Pippin.png' },
+            { label: 'Playdia', path: 'Icons/Consoles/Bandai/Playdia.png' },
+            { label: 'RX 78', path: 'Icons/Consoles/Bandai/RX 78.png' },
+            { label: 'SwanCrystal', path: 'Icons/Consoles/Bandai/SwanCrystal.png' },
+            { label: 'TV Jack', path: 'Icons/Consoles/Bandai/TV Jack.png' },
+            { label: 'WonderSwan Color', path: 'Icons/Consoles/Bandai/WonderSwan Color.png' },
+            { label: 'WonderSwan', path: 'Icons/Consoles/Bandai/WonderSwan.png' },
+            { label: 'Loopy', path: 'Icons/Consoles/Casio/Loopy.png' },
+            { label: 'PV-1000', path: 'Icons/Consoles/Casio/PV-1000.png' },
+            { label: 'Aquarius', path: 'Icons/Consoles/Mattel/Aquarius.png' },
+            { label: 'HyperScan', path: 'Icons/Consoles/Mattel/HyperScan.png' },
+            { label: 'Intellivision', path: 'Icons/Consoles/Mattel/Intellivision.png' },
+            { label: 'Mattel Electronics', path: 'Icons/Consoles/Mattel/Mattel Electronics.png' },
+            { label: 'Microsoft Xbox 360', path: 'Icons/Consoles/Microsoft/Microsoft Xbox 360.png' },
+            { label: 'Microsoft Xbox One S', path: 'Icons/Consoles/Microsoft/Microsoft Xbox One S.png' },
+            { label: 'Microsoft Xbox One X', path: 'Icons/Consoles/Microsoft/Microsoft Xbox One X.png' },
+            { label: 'Microsoft Xbox One', path: 'Icons/Consoles/Microsoft/Microsoft Xbox One.png' },
+            { label: 'Microsoft Xbox Series S', path: 'Icons/Consoles/Microsoft/Microsoft Xbox Series S.png' },
+            { label: 'Microsoft Xbox Series X', path: 'Icons/Consoles/Microsoft/Microsoft Xbox Series X.png' },
+            { label: 'Microsoft Xbox', path: 'Icons/Consoles/Microsoft/Microsoft Xbox.png' },
+            { label: 'PC-FX', path: 'Icons/Consoles/NEC/PC-FX.png' },
+            { label: 'TurboDuo', path: 'Icons/Consoles/NEC/TurboDuo.png' },
+            { label: 'TurboExpress', path: 'Icons/Consoles/NEC/TurboExpress.png' },
+            { label: 'TurboGrafx-16', path: 'Icons/Consoles/NEC/TurboGrafx-16.png' },
+            { label: 'Neo Geo AES', path: 'Icons/Consoles/Neo Geo/Neo Geo AES.png' },
+            { label: 'Neo Geo CD', path: 'Icons/Consoles/Neo Geo/Neo Geo CD.png' },
+            { label: 'Neo Geo Pocket Color', path: 'Icons/Consoles/Neo Geo/Neo Geo Pocket Color.png' },
+            { label: 'Neo Geo Pocket', path: 'Icons/Consoles/Neo Geo/Neo Geo Pocket.png' },
+            { label: 'Color TV Game', path: 'Icons/Consoles/Nintendo/Color TV Game.png' },
+            { label: 'Famicom Disk System', path: 'Icons/Consoles/Nintendo/Famicom Disk System.png' },
+            { label: 'Famicom', path: 'Icons/Consoles/Nintendo/Famicom.png' },
+            { label: 'Game & Watch Mini Classics', path: 'Icons/Consoles/Nintendo/Game & Watch Mini Classics.png' },
+            { label: 'Game & Watch', path: 'Icons/Consoles/Nintendo/Game & Watch.png' },
+            { label: 'Game Boy Advance SP', path: 'Icons/Consoles/Nintendo/Game Boy Advance SP.png' },
+            { label: 'Game Boy Advance', path: 'Icons/Consoles/Nintendo/Game Boy Advance.png' },
+            { label: 'Game Boy Color', path: 'Icons/Consoles/Nintendo/Game Boy Color.png' },
+            { label: 'Game Boy Light', path: 'Icons/Consoles/Nintendo/Game Boy Light.png' },
+            { label: 'Game Boy Micro', path: 'Icons/Consoles/Nintendo/Game Boy Micro.png' },
+            { label: 'Game Boy Pocket', path: 'Icons/Consoles/Nintendo/Game Boy Pocket.png' },
+            { label: 'Game Boy', path: 'Icons/Consoles/Nintendo/Game Boy.png' },
+            { label: 'Gamecube', path: 'Icons/Consoles/Nintendo/Gamecube.png' },
+            { label: 'NES', path: 'Icons/Consoles/Nintendo/NES.webp' },
+            { label: 'New Nintendo 2DS XL', path: 'Icons/Consoles/Nintendo/New Nintendo 2DS XL.png' },
+            { label: 'New Nintendo 3DS Xl', path: 'Icons/Consoles/Nintendo/New Nintendo 3DS Xl.png' },
+            { label: 'New Nintendo 3DS', path: 'Icons/Consoles/Nintendo/New Nintendo 3DS.png' },
+            { label: 'Nintendo 2DS', path: 'Icons/Consoles/Nintendo/Nintendo 2DS.png' },
+            { label: 'Nintendo 3DS Xl', path: 'Icons/Consoles/Nintendo/Nintendo 3DS Xl.png' },
+            { label: 'Nintendo 3DS', path: 'Icons/Consoles/Nintendo/Nintendo 3DS.png' },
+            { label: 'Nintendo 64 DD', path: 'Icons/Consoles/Nintendo/Nintendo 64 DD.png' },
+            { label: 'Nintendo 64', path: 'Icons/Consoles/Nintendo/Nintendo 64.png' },
+            { label: 'Nintendo DS Lite', path: 'Icons/Consoles/Nintendo/Nintendo DS Lite.png' },
+            { label: 'Nintendo DS', path: 'Icons/Consoles/Nintendo/Nintendo DS.png' },
+            { label: 'Nintendo DSi XL', path: 'Icons/Consoles/Nintendo/Nintendo DSi XL.png' },
+            { label: 'Nintendo DSi', path: 'Icons/Consoles/Nintendo/Nintendo DSi.png' },
+            { label: 'Nintendo Switch 2', path: 'Icons/Consoles/Nintendo/Nintendo Switch 2.webp' },
+            { label: 'Nintendo Switch Lite', path: 'Icons/Consoles/Nintendo/Nintendo Switch Lite.png' },
+            { label: 'Nintendo Switch OLED Model', path: 'Icons/Consoles/Nintendo/Nintendo Switch OLED Model.png' },
+            { label: 'Nintendo Switch', path: 'Icons/Consoles/Nintendo/Nintendo Switch.png' },
+            { label: 'Nintendo Wii U', path: 'Icons/Consoles/Nintendo/Nintendo Wii U.png' },
+            { label: 'Nintendo Wii', path: 'Icons/Consoles/Nintendo/Nintendo Wii.png' },
+            { label: 'Pokemon Mini', path: 'Icons/Consoles/Nintendo/Pokemon Mini.png' },
+            { label: 'SNES', path: 'Icons/Consoles/Nintendo/SNES.png' },
+            { label: 'Virtual Boy', path: 'Icons/Consoles/Nintendo/Virtual Boy.webp' },
+            { label: 'CD-i', path: 'Icons/Consoles/Philips Magnavox/CD-i.png' },
+            { label: 'Magnavox Odyssey 2', path: 'Icons/Consoles/Philips Magnavox/Magnavox Odyssey 2.png' },
+            { label: 'Magnavox Odyssey', path: 'Icons/Consoles/Philips Magnavox/Magnavox Odyssey.png' },
+            { label: 'Philips Odyssey', path: 'Icons/Consoles/Philips Magnavox/Philips Odyssey.png' },
+            { label: 'Retro-Emulator-Game-Manger-0aaa86b99c10021463039c348ecbfffc1c41144c', path: 'Icons/Consoles/Retro-Emulator-Game-Manger-0aaa86b99c10021463039c348ecbfffc1c41144c/Retro-Emulator-Game-Manger-0aaa86b99c10021463039c348ecbfffc1c41144c' },
+            { label: 'Retro-Emulator-Game-Manger-ac923861fc63c3c096c8133c5e9370443cdceb1a', path: 'Icons/Consoles/Retro-Emulator-Game-Manger-ac923861fc63c3c096c8133c5e9370443cdceb1a/Retro-Emulator-Game-Manger-ac923861fc63c3c096c8133c5e9370443cdceb1a' },
+            { label: 'Sega 32X', path: 'Icons/Consoles/Sega/Sega 32X.png' },
+            { label: 'Sega Dreamcast', path: 'Icons/Consoles/Sega/Sega Dreamcast.png' },
+            { label: 'Sega Game Gear', path: 'Icons/Consoles/Sega/Sega Game Gear.png' },
+            { label: 'Sega Genesis Mega Drive', path: 'Icons/Consoles/Sega/Sega Genesis Mega Drive.png' },
+            { label: 'Sega Master System', path: 'Icons/Consoles/Sega/Sega Master System.png' },
+            { label: 'Sega Mega CD', path: 'Icons/Consoles/Sega/Sega Mega CD.png' },
+            { label: 'Sega Pico', path: 'Icons/Consoles/Sega/Sega Pico.png' },
+            { label: 'Sega SG X000', path: 'Icons/Consoles/Sega/Sega SG X000.png' },
+            { label: 'Sega Saturn', path: 'Icons/Consoles/Sega/Sega Saturn.png' },
+            { label: 'PlayStation 5 Pro', path: 'Icons/Consoles/Sony/PlayStation 5 Pro.png' },
+            { label: 'PlayStation 5 Slim', path: 'Icons/Consoles/Sony/PlayStation 5 Slim.png' },
+            { label: 'Sony PSP Go', path: 'Icons/Consoles/Sony/Sony PSP Go.png' },
+            { label: 'Sony PSP X000 Series', path: 'Icons/Consoles/Sony/Sony PSP X000 Series.png' },
+            { label: 'Sony PSX', path: 'Icons/Consoles/Sony/Sony PSX.png' },
+            { label: 'Sony PlayStation  TV', path: 'Icons/Consoles/Sony/Sony PlayStation  TV.png' },
+            { label: 'Sony PlayStation 2 Slim', path: 'Icons/Consoles/Sony/Sony PlayStation 2 Slim.png' },
+            { label: 'Sony PlayStation 2', path: 'Icons/Consoles/Sony/Sony PlayStation 2.png' },
+            { label: 'Sony PlayStation 3 Slim', path: 'Icons/Consoles/Sony/Sony PlayStation 3 Slim.png' },
+            { label: 'Sony PlayStation 3 Super Slim', path: 'Icons/Consoles/Sony/Sony PlayStation 3 Super Slim.png' },
+            { label: 'Sony PlayStation 3', path: 'Icons/Consoles/Sony/Sony PlayStation 3.png' },
+            { label: 'Sony PlayStation 4 Pro', path: 'Icons/Consoles/Sony/Sony PlayStation 4 Pro.png' },
+            { label: 'Sony PlayStation 4 Slim', path: 'Icons/Consoles/Sony/Sony PlayStation 4 Slim.png' },
+            { label: 'Sony PlayStation 4', path: 'Icons/Consoles/Sony/Sony PlayStation 4.png' },
+            { label: 'Sony PlayStation 5', path: 'Icons/Consoles/Sony/Sony PlayStation 5.png' },
+            { label: 'Sony PlayStation Vita', path: 'Icons/Consoles/Sony/Sony PlayStation Vita.png' },
+            { label: 'Sony PlayStation', path: 'Icons/Consoles/Sony/Sony PlayStation.png' }
+        ];
+
         let state = {
             view: 'HOME',
             selectedConsole: null,
@@ -371,12 +486,44 @@
             });
         }
 
+        function normalizeConsoleName(value) {
+            return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+        }
+
+        function scoreConsoleMatch(a, b) {
+            if (!a || !b) return 0;
+            if (a === b) return 1;
+            const aTokens = new Set(a.split(' ').filter(Boolean));
+            const bTokens = new Set(b.split(' ').filter(Boolean));
+            let common = 0;
+            aTokens.forEach(token => {
+                if (bTokens.has(token)) common += 1;
+            });
+            return common / Math.max(aTokens.size, bTokens.size);
+        }
+
+        function getConsoleIcon(name) {
+            const target = normalizeConsoleName(name || '');
+            let bestPath = null;
+            let bestScore = 0;
+            CONSOLE_ICON_INDEX.forEach(entry => {
+                const score = scoreConsoleMatch(target, normalizeConsoleName(entry.label));
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestPath = entry.path;
+                }
+            });
+            return bestScore >= 0.4 ? bestPath : null;
+        }
+
         function renderConsoles() {
             const grid = document.getElementById('console-grid');
             const entries = state.consoles.length ? state.consoles : CONSOLES;
-            grid.innerHTML = entries.map(c => `
+            grid.innerHTML = entries.map(c => {
+                const iconPath = getConsoleIcon(c.name) || c.img;
+                return `
                 <div class="console-card group glass rounded-3xl p-5 cursor-pointer relative overflow-hidden h-56 flex flex-col justify-end border border-white/5" onclick="selectConsole('${c.id}')">
-                    <img src="${c.img}" class="absolute inset-0 w-full h-full object-contain opacity-10 group-hover:opacity-20 transition-all -z-10 group-hover:scale-105 duration-500 p-8">
+                    <img src="${iconPath}" class="absolute inset-0 w-full h-full object-contain opacity-10 group-hover:opacity-20 transition-all -z-10 group-hover:scale-105 duration-500 p-8">
                     <div class="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent"></div>
                     <div class="relative z-10">
                         <div class="w-10 h-10 rounded-xl flex items-center justify-center mb-3" style="background-color: ${c.color}">
@@ -386,7 +533,7 @@
                         <p class="text-[9px] text-white/30 uppercase tracking-[0.2em] font-black italic">Library Access</p>
                     </div>
                 </div>
-            `).join('');
+            `}).join('');
             lucide.createIcons();
         }
 
@@ -478,26 +625,32 @@
                     grouped[key].push(g);
                 });
 
-                sectionsContainer.innerHTML = Object.entries(grouped).map(([consoleName, games]) => `
-                    <div class="animate-fade">
-                        <h3 class="text-[10px] font-black italic text-blue-500 uppercase tracking-[0.4em] mb-4 border-b border-blue-500/10 pb-2">${consoleName} <span class="text-white/20 ml-2">(${games.length})</span></h3>
-                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
-                            ${games.map(game => `
-                                <div class="game-card glass rounded-2xl p-4 flex flex-col h-72 relative overflow-hidden group border border-white/5 cursor-pointer" onclick="showMarketGameDetails('${game.link}')">
-                                    <div class="w-full h-36 bg-black/40 rounded-xl mb-3 overflow-hidden relative">
-                                        <img src="${game.thumbnail ? API.proxyImg(game.thumbnail) : 'https://placehold.co/400x300/111/555?text=No+Boxart'}" 
-                                             class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500">
+                sectionsContainer.innerHTML = Object.entries(grouped).map(([consoleName, games]) => {
+                    const consoleIcon = getConsoleIcon(consoleName);
+                    const header = consoleIcon
+                        ? `<div class="flex items-center gap-2"><img src="${consoleIcon}" class="w-5 h-5 object-contain opacity-80"> <span>${consoleName}</span></div>`
+                        : consoleName;
+                    return `
+                        <div class="animate-fade">
+                            <h3 class="text-[10px] font-black italic text-blue-500 uppercase tracking-[0.4em] mb-4 border-b border-blue-500/10 pb-2">${header} <span class="text-white/20 ml-2">(${games.length})</span></h3>
+                            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+                                ${games.map(game => `
+                                    <div class="game-card glass rounded-2xl p-4 flex flex-col h-72 relative overflow-hidden group border border-white/5 cursor-pointer" onclick="showMarketGameDetails('${game.link}')">
+                                        <div class="w-full h-36 bg-black/40 rounded-xl mb-3 overflow-hidden relative">
+                                            <img src="${game.thumbnail ? API.proxyImg(game.thumbnail) : 'https://placehold.co/400x300/111/555?text=No+Boxart'}" 
+                                                 class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500">
+                                        </div>
+                                        <h4 class="text-xs font-bold truncate mb-1 uppercase tracking-tight">${game.title}</h4>
+                                        <p class="text-[9px] text-white/20 uppercase font-black tracking-widest mt-auto italic">${game.players || '1-Player'}</p>
+                                        <div class="mt-2">
+                                            <button class="w-full py-2 bg-white/5 group-hover:bg-blue-600 text-[9px] font-black uppercase tracking-widest transition-all rounded-lg group-hover:text-white text-white/40">Details</button>
+                                        </div>
                                     </div>
-                                    <h4 class="text-xs font-bold truncate mb-1 uppercase tracking-tight">${game.title}</h4>
-                                    <p class="text-[9px] text-white/20 uppercase font-black tracking-widest mt-auto italic">${game.players || '1-Player'}</p>
-                                    <div class="mt-2">
-                                        <button class="w-full py-2 bg-white/5 group-hover:bg-blue-600 text-[9px] font-black uppercase tracking-widest transition-all rounded-lg group-hover:text-white text-white/40">Details</button>
-                                    </div>
-                                </div>
-                            `).join('')}
+                                `).join('')}
+                            </div>
                         </div>
-                    </div>
-                `).join('');
+                    `;
+                }).join('');
                 lucide.createIcons();
                 prepareMedia(sectionsContainer);
             } catch (e) {
