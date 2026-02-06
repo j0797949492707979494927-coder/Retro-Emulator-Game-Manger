@@ -298,6 +298,8 @@
             { id: 'dendy', name: 'NES Classic', color: '#ef4444', icon: 'gamepad-2', img: 'https://i.imgur.com/OzB5tOq.png', core: 'nes' },
             { id: 'snes', name: 'Super NES', color: '#8b5cf6', icon: 'joystick', img: 'https://i.imgur.com/wK6sR8Q.png', core: 'snes' },
             { id: 'n64', name: 'Nintendo 64', color: '#4b5563', icon: 'diamond', img: 'https://i.imgur.com/VqN9F6A.png', core: 'n64' },
+            { id: 'genesis', name: 'Sega Genesis', color: '#f97316', icon: 'bolt', img: 'https://placehold.co/320x240/111/444?text=Genesis', core: 'segaMD' },
+            { id: 'megadrive', name: 'Sega Mega Drive', color: '#f97316', icon: 'bolt', img: 'https://placehold.co/320x240/111/444?text=Mega+Drive', core: 'segaMD' },
             { id: 'ps1', name: 'PlayStation', color: '#3b82f6', icon: 'disc', img: 'https://i.imgur.com/4Uj2GyX.png', core: 'psx' },
             { id: 'gba', name: 'GameBoy Adv', color: '#6366f1', icon: 'smartphone', img: 'https://i.imgur.com/yMjF94b.png', core: 'gba' }
         ];
@@ -590,7 +592,7 @@
                 </div>
             `;
             
-            const con = CONSOLES.find(c => c.id === consoleId);
+            const con = state.consoles.find(c => c.id === consoleId) || CONSOLES.find(c => c.id === consoleId);
             libTitle.textContent = con ? con.name : 'Vault';
             list.innerHTML = `<div class="p-6 text-center text-[10px] font-black text-white/10 animate-pulse italic uppercase tracking-widest">Scanning...</div>`;
             
