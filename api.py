@@ -491,6 +491,15 @@ def run_download_job(job_id, rom_url, rom_name, console, game_url):
         download_jobs[job_id]["status"] = "error"
         download_jobs[job_id]["error"] = str(exc)
 
+
+
+@app.after_request
+def apply_shared_array_buffer_headers(response):
+    # Required for cores that depend on SharedArrayBuffer (e.g. PPSSPP via EmulatorJS).
+    response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
+    response.headers["Cross-Origin-Embedder-Policy"] = "require-corp"
+    return response
+
 # ------------------------------
 # Routes
 @app.route("/")
