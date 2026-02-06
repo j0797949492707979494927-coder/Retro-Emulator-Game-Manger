@@ -6,9 +6,18 @@ from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtCore import QUrl
 from api import app as flask_app
 
-# Reduce GPU-related rendering glitches in Qt WebEngine.
-os.environ.setdefault("QTWEBENGINE_CHROMIUM_FLAGS", "--disable-gpu --disable-gpu-compositing")
-os.environ.setdefault("QT_OPENGL", "software")
+# Rendering mode:
+# - default: performance-oriented (hardware acceleration)
+# - set REGM_SAFE_RENDER=1 for compatibility mode on glitchy GPUs
+if os.environ.get("REGM_SAFE_RENDER") == "1":
+    os.environ.setdefault("QTWEBENGINE_CHROMIUM_FLAGS", "--disable-gpu --disable-gpu-compositing")
+    os.environ.setdefault("QT_OPENGL", "software")
+else:
+    os.environ.setdefault(
+        "QTWEBENGINE_CHROMIUM_FLAGS",
+        "--enable-gpu-rasterization --enable-zero-copy --ignore-gpu-blocklist",
+    )
+    os.environ.setdefault("QT_OPENGL", "desktop")
 
 # Start Flask backend in background
 threading.Thread(target=lambda: flask_app.run(port=5000, debug=False, use_reloader=False), daemon=True).start()
