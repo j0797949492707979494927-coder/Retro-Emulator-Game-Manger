@@ -236,6 +236,10 @@
                     <div id="settings-covers" class="space-y-3 text-xs text-white/60"></div>
                 </div>
                 <div class="glass rounded-3xl p-6 border border-white/5 space-y-4 lg:col-span-2">
+                    <h3 class="text-sm font-bold uppercase tracking-widest text-white/60">Emulator Providers</h3>
+                    <div id="settings-emulators" class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs text-white/60"></div>
+                </div>
+                <div class="glass rounded-3xl p-6 border border-white/5 space-y-4 lg:col-span-2">
                     <h3 class="text-sm font-bold uppercase tracking-widest text-white/60">Add-ons</h3>
                     <p class="text-[11px] text-white/40">Drop addon folders into <span class="text-white/70">/addons</span> to extend functionality.</p>
                     <div id="settings-addons" class="flex flex-wrap gap-2 text-[10px] uppercase"></div>
@@ -417,13 +421,15 @@
                 coverSources: {
                     emuland: true,
                     thegamesdb: true
-                }
+                },
+                emulators: {}
             };
             try {
                 const stored = JSON.parse(localStorage.getItem('settings') || '{}');
                 return {
                     stores: { ...defaults.stores, ...(stored.stores || {}) },
-                    coverSources: { ...defaults.coverSources, ...(stored.coverSources || {}) }
+                    coverSources: { ...defaults.coverSources, ...(stored.coverSources || {}) },
+                    emulators: { ...defaults.emulators, ...(stored.emulators || {}) }
                 };
             } catch (e) {
                 return defaults;
@@ -688,27 +694,59 @@
             const target = document.getElementById('emulator-target');
             const title = document.getElementById('emulating-title');
             const romName = state.selectedLocalGame.rom || state.selectedLocalGame.title || "ROM";
+            const settings = getSettings();
+            const provider = settings.emulators?.[consoleId] || 'emulatorjs';
 
             title.textContent = `RUNNING: ${romName.toUpperCase()} (${con.name})`;
             modal.style.display = 'flex';
             target.innerHTML = `<div id="game-player" class="emulator-container"></div>`;
 
-            // EmulatorJS Configuration
-            window.EJS_player = '#game-player';
-            window.EJS_core = con.core;
-            window.EJS_gameUrl = `/roms/${consoleId}/${encodeURIComponent(state.selectedLocalGame.folder)}/${encodeURIComponent(state.selectedLocalGame.rom)}`;
-            window.EJS_pathtodata = 'https://cdn.emulatorjs.org/stable/data/';
-            window.EJS_startOnLoaded = true; // Automatically start loading without extra "Start Game" button
-            window.EJS_AdUrl = ''; // Ensure no ad behavior
-            
-            // Clean up any existing scripts to avoid duplicates
-            const existingScript = document.getElementById('ejs-loader');
-            if (existingScript) existingScript.remove();
+            if (provider === 'neptunjs') {
+                const nepEmuMap = {
+                    dendy: 'nes',
+                    snes: 'snes',
+                    n64: 'n64',
+                    genesis: 'sega',
+                    megadrive: 'sega',
+                    ps1: 'psx',
+                    gba: 'gba'
+                };
+                const nepEmu = nepEmuMap[consoleId];
+                if (!nepEmu) return;
+                target.innerHTML = `<div id="emu" class="emulator-container"></div>`;
+                window.NepPlayer = "#emu";
+                window.NepEmu = nepEmu;
+                window.NepZoom = "enable";
+                window.NepMaxWidth = "1100px";
+                window.NepLang = "en";
+                window.EmuN64air = nepEmu === 'n64';
+                window.gameUrl = `${window.location.origin}/roms/${consoleId}/${encodeURIComponent(state.selectedLocalGame.folder)}/${encodeURIComponent(state.selectedLocalGame.rom)}`;
 
-            const script = document.createElement('script');
-            script.id = 'ejs-loader';
-            script.src = 'https://cdn.emulatorjs.org/stable/data/loader.js';
-            document.body.appendChild(script);
+                const existingScript = document.getElementById('neptunjs-loader');
+                if (existingScript) existingScript.remove();
+                const script = document.createElement('script');
+                script.id = 'neptunjs-loader';
+                script.src = 'https://mem.neptunjs.com/njs/njsLoader.js';
+                script.type = 'text/javascript';
+                document.body.appendChild(script);
+            } else {
+                // EmulatorJS Configuration
+                window.EJS_player = '#game-player';
+                window.EJS_core = con.core;
+                window.EJS_gameUrl = `/roms/${consoleId}/${encodeURIComponent(state.selectedLocalGame.folder)}/${encodeURIComponent(state.selectedLocalGame.rom)}`;
+                window.EJS_pathtodata = 'https://cdn.emulatorjs.org/stable/data/';
+                window.EJS_startOnLoaded = true; // Automatically start loading without extra "Start Game" button
+                window.EJS_AdUrl = ''; // Ensure no ad behavior
+                
+                // Clean up any existing scripts to avoid duplicates
+                const existingScript = document.getElementById('ejs-loader');
+                if (existingScript) existingScript.remove();
+
+                const script = document.createElement('script');
+                script.id = 'ejs-loader';
+                script.src = 'https://cdn.emulatorjs.org/stable/data/loader.js';
+                document.body.appendChild(script);
+            }
             
             state.isEmulating = true;
         }
@@ -741,10 +779,19 @@
     delete window.EJS_core;
     delete window.EJS_gameUrl;
     delete window.EJS_emulator;
+    delete window.NepPlayer;
+    delete window.NepEmu;
+    delete window.NepZoom;
+    delete window.NepMaxWidth;
+    delete window.NepLang;
+    delete window.EmuN64air;
+    delete window.gameUrl;
 
     // Remove loader script
     const script = document.getElementById('ejs-loader');
     if (script) script.remove();
+    const nepScript = document.getElementById('neptunjs-loader');
+    if (nepScript) nepScript.remove();
 
     modal.style.display = 'none';
     state.isEmulating = false;
@@ -799,9 +846,11 @@
             const storeContainer = document.getElementById('settings-stores');
             const coverContainer = document.getElementById('settings-covers');
             const addonsContainer = document.getElementById('settings-addons');
+            const emulatorContainer = document.getElementById('settings-emulators');
             storeContainer.innerHTML = '';
             coverContainer.innerHTML = '';
             addonsContainer.innerHTML = '';
+            emulatorContainer.innerHTML = '';
 
             Object.entries(settings.stores).forEach(([key, enabled]) => {
                 const row = document.createElement('label');
@@ -829,6 +878,25 @@
                     saveSettings(settings);
                 });
                 coverContainer.appendChild(row);
+            });
+
+            state.consoles.forEach(consoleEntry => {
+                const row = document.createElement('label');
+                row.className = 'flex items-center justify-between bg-white/5 rounded-xl px-4 py-3 border border-white/5';
+                row.innerHTML = `
+                    <span class="uppercase tracking-widest">${consoleEntry.name}</span>
+                    <select class="bg-black/40 border border-white/10 rounded-lg px-2 py-1 text-[10px] uppercase">
+                        <option value="emulatorjs">EmulatorJS</option>
+                        <option value="neptunjs">NeptunJS</option>
+                    </select>
+                `;
+                const select = row.querySelector('select');
+                select.value = settings.emulators[consoleEntry.id] || 'emulatorjs';
+                select.addEventListener('change', (e) => {
+                    settings.emulators[consoleEntry.id] = e.target.value;
+                    saveSettings(settings);
+                });
+                emulatorContainer.appendChild(row);
             });
 
             const addons = await API.listAddons();
