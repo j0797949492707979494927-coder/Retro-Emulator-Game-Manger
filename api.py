@@ -554,6 +554,10 @@ def delete_rom():
 def serve_rom(console, filename):
     return send_from_directory(os.path.join(ROM_DIR, console), filename)
 
+@app.route("/Icons/<path:filename>")
+def serve_icons(filename):
+    return send_from_directory("Icons", filename)
+
 @app.route("/<path:path>")
 def static_files(path):
     return send_from_directory("ui", path)
