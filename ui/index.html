@@ -434,6 +434,13 @@
 
         function selectConsole(id) {
             state.selectedConsole = state.consoles.find(c => c.id === id);
+            state.selectedLocalGame = null;
+            document.getElementById('library-detail-container').innerHTML = `
+                <div class="h-full flex flex-col items-center justify-center text-white/10 text-center space-y-4 py-20">
+                    <i data-lucide="gamepad-2" size="48" class="opacity-10"></i>
+                    <p class="text-[10px] font-black uppercase tracking-widest italic">Select local module</p>
+                </div>
+            `;
             navTo('LIBRARY');
             loadLocalGames(id);
         }
@@ -575,6 +582,13 @@
             const list = document.getElementById('local-list');
             const countLabel = document.getElementById('local-count');
             const libTitle = document.getElementById('library-title');
+            state.selectedLocalGame = null;
+            document.getElementById('library-detail-container').innerHTML = `
+                <div class="h-full flex flex-col items-center justify-center text-white/10 text-center space-y-4 py-20">
+                    <i data-lucide="gamepad-2" size="48" class="opacity-10"></i>
+                    <p class="text-[10px] font-black uppercase tracking-widest italic">Select local module</p>
+                </div>
+            `;
             
             const con = CONSOLES.find(c => c.id === consoleId);
             libTitle.textContent = con ? con.name : 'Vault';
@@ -700,6 +714,11 @@
         function closeEmulator() {
     const modal = document.getElementById('emulator-modal');
     const target = document.getElementById('emulator-target');
+
+    try {
+        if (window.EJS_emulator?.exit) window.EJS_emulator.exit();
+        if (window.EJS_emulator?.pause) window.EJS_emulator.pause();
+    } catch (e) {}
 
     // Kill everything inside
     target.innerHTML = '';
