@@ -178,6 +178,9 @@
                     <input id="search-input" type="text" placeholder="Global Search..." 
                            class="bg-white/5 border border-white/5 rounded-full py-2 pl-10 pr-4 text-[11px] w-64 focus:outline-none focus:border-blue-500/50 transition-all font-medium">
                 </div>
+                <select id="search-console-filter" size="1" class="stable-select bg-white/5 border border-white/10 rounded-full px-3 text-[10px] uppercase tracking-widest text-white/70">
+                    <option value="">All Systems</option>
+                </select>
                 <div id="current-time" class="text-[11px] font-bold tracking-widest text-white/40">00:00</div>
             </div>
         </header>
@@ -252,7 +255,10 @@
                     <div id="settings-emulators" class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs text-white/60"></div>
                 </div>
                 <div class="glass rounded-3xl p-6 border border-white/5 space-y-4 lg:col-span-2">
-                    <h3 class="text-sm font-bold uppercase tracking-widest text-white/60">Add-ons</h3>
+                    <div class="flex items-center justify-between gap-3">
+                        <h3 class="text-sm font-bold uppercase tracking-widest text-white/60">Add-ons</h3>
+                        <button id="btn-rescan-metadata" class="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-[10px] font-black uppercase tracking-widest transition-all">Rescan Library Metadata</button>
+                    </div>
                     <p class="text-[11px] text-white/40">Drop addon folders into <span class="text-white/70">/addons</span> to extend functionality.</p>
                     <div id="settings-addons" class="flex flex-wrap gap-2 text-[10px] uppercase"></div>
                 </div>
@@ -292,7 +298,7 @@
 
     <script>
         const API = {
-            search: (q) => fetch(`/search?q=${encodeURIComponent(q)}`).then(r => r.json()),
+            search: (q, consoleId) => { const params = new URLSearchParams({ q }); if (consoleId) params.set('console', consoleId); return fetch(`/search?${params.toString()}`).then(r => r.json()); },
             getGame: (url) => fetch(`/game?url=${encodeURIComponent(url)}`).then(r => r.json()),
             getMarketCover: (title, console) => fetch(`/market_cover?title=${encodeURIComponent(title)}&console=${encodeURIComponent(console || '')}`).then(r => r.json()),
             listLocal: (console) => fetch(`/list_console?console=${console}`).then(r => r.json()),
@@ -650,6 +656,36 @@
                 state.consoles = CONSOLES;
             }
             renderConsoles();
+            populateSearchFilter();
+        }
+
+        function populateSearchFilter() {
+            const select = document.getElementById('search-console-filter');
+            if (!select) return;
+            const prev = select.value;
+            select.innerHTML = '<option value="">All Systems</option>' + state.consoles.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+            if ([...select.options].some(o => o.value === prev)) select.value = prev;
+        }
+
+        async function rescanLibraryMetadata() {
+            const button = document.getElementById('btn-rescan-metadata');
+            if (!button) return;
+            const original = button.textContent;
+            button.disabled = true;
+            button.textContent = 'Rescanning...';
+            try {
+                const targetConsole = state.selectedConsole?.id || '';
+                const params = new URLSearchParams();
+                if (targetConsole) params.set('console', targetConsole);
+                const data = await fetch(`/refresh_covers?${params.toString()}`).then(r => r.json());
+                alert(`Metadata rescan complete. Updated: ${data.updated || 0}, Skipped: ${data.skipped || 0}`);
+                if (state.selectedConsole) await loadLocalGames(state.selectedConsole.id);
+            } catch (e) {
+                alert('Metadata rescan failed. Please try again.');
+            } finally {
+                button.disabled = false;
+                button.textContent = original;
+            }
         }
 
         function getSettings() {
@@ -709,10 +745,11 @@
             const renderToken = ++storeRenderToken;
             
             sectionsContainer.innerHTML = `<div class="py-20 text-center font-black text-white/10 italic animate-pulse uppercase tracking-[0.3em]">Querying Network Archive...</div>`;
-            status.textContent = `SEARCHING: "${q.toUpperCase()}"`;
+            status.textContent = `SEARCHING: "${q.toUpperCase()}" ${document.getElementById('search-console-filter')?.value ? `(FILTER: ${document.getElementById('search-console-filter').value.toUpperCase()})` : ""}`;
 
             try {
-                const data = await API.search(q);
+                const consoleFilter = document.getElementById('search-console-filter')?.value || '';
+                const data = await API.search(q, consoleFilter || null);
                 if (renderToken !== storeRenderToken) return;
                 if (!data.games || data.games.length === 0) {
                     sectionsContainer.innerHTML = `<div class="py-20 text-center font-black text-white/10 italic uppercase tracking-[0.2em]">Zero results found in global cache.</div>`;
@@ -1228,6 +1265,8 @@
         }
 
         document.getElementById('search-input').addEventListener('keypress', (e) => e.key === 'Enter' && doSearch());
+        document.getElementById('search-console-filter').addEventListener('change', () => { if (document.getElementById('search-input').value.trim()) doSearch(); });
+        document.getElementById('btn-rescan-metadata').addEventListener('click', rescanLibraryMetadata);
 
         document.addEventListener('DOMContentLoaded', () => {
             loadConsoleList();

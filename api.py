@@ -53,6 +53,14 @@ def has_cover_metadata(metadata):
         return False
     return bool(metadata.get("cover_front") or metadata.get("clearlogo"))
 
+def metadata_needs_enrichment(metadata):
+    if not metadata:
+        return True
+    has_description = bool((metadata.get("description") or "").strip() or (metadata.get("overview") or "").strip())
+    has_cover = bool(metadata.get("cover_front") or metadata.get("clearlogo"))
+    has_media = bool(metadata.get("screenshots") or metadata.get("fanart"))
+    return not (has_description and has_cover and has_media)
+
 download_jobs = {}
 
 # ------------------------------
@@ -161,6 +169,10 @@ def parse_vimm_rom_page(html, url, console_id=None):
         v1 = td.find_next_sibling("td")
         v2 = v1.find_next_sibling("td") if v1 else None
         return v2.get_text(" ", strip=True) if v2 else None
+
+    region_img = soup.select_one("td div img.flag")
+    if region_img and region_img.get("title"):
+        data["info"]["region"] = region_img.get("title")
 
     for key, label in (("players", "Players"), ("year", "Year"), ("graphics", "Graphics"), ("sound", "Sound"), ("gameplay", "Gameplay"), ("overall", "Overall")):
         value = get_row_value(label)
@@ -637,7 +649,7 @@ def refresh_missing_covers(target_console=None):
                 continue
             metadata_path = os.path.join(entry_path, "metadata.json")
             metadata = load_local_metadata(metadata_path)
-            if has_cover_metadata(metadata):
+            if not metadata_needs_enrichment(metadata):
                 skipped += 1
                 continue
             enrich_metadata(entry_path, entry, console_id, seed_title=(metadata or {}).get("title"))
@@ -696,6 +708,8 @@ def run_download_job(job_id, rom_url, rom_name, console, game_url, media_id=None
                     "info": game_data.get("info", {}),
                     "description": game_data.get("description"),
                     "screenshots": local_screenshots,
+                    "cover_front": game_data.get("thumbnail"),
+                    "fanart": game_data.get("screenshots") or [],
                     "source_url": game_url
                 }
                 existing_metadata = load_local_metadata(metadata_path) or {}
@@ -751,7 +765,10 @@ def game_page():
     url = request.args.get("url")
     if not url:
         return jsonify({"status":"error","message":"Missing URL"}), 400
-    html = curl_get(url)
+    try:
+        html = curl_get(url)
+    except requests.RequestException:
+        return jsonify({"status":"error","message":"Failed to fetch game details"}), 502
     game = parse_game(html, url, console_hint=request.args.get("console"))
     return jsonify({"status":"ok","game":game})
 
