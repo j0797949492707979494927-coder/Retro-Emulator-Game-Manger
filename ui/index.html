@@ -54,38 +54,75 @@
             scrollbar-gutter: stable;
         }
 
-        .stable-select {
+        .custom-dropdown {
+            position: relative;
+            min-width: 150px;
+        }
+
+        .custom-dropdown-btn {
+            width: 100%;
             height: 2rem;
-            max-width: 220px;
-            min-width: 140px;
             padding: 0 2rem 0 0.75rem;
             border-radius: 0.75rem;
-            background-color: rgba(2, 6, 23, 0.95);
-            color: #e5e7eb;
             border: 1px solid rgba(255, 255, 255, 0.14);
-            transition: none !important;
-            transform: none !important;
-            animation: none !important;
-            appearance: none;
-            -webkit-appearance: none;
-            color-scheme: dark;
-            line-height: 1.1;
-            overflow: hidden;
-            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%239ca3af' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
-            background-repeat: no-repeat;
-            background-position: right 0.55rem center;
-            background-size: 0.85rem;
-        }
-
-        .stable-select:focus {
-            outline: none;
-            box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.5);
-            border-color: rgba(59, 130, 246, 0.5);
-        }
-
-        .stable-select option {
-            background-color: #0b1020;
+            background: rgba(2, 6, 23, 0.95);
             color: #e5e7eb;
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            text-align: left;
+            position: relative;
+        }
+
+        .custom-dropdown-btn::after {
+            content: '▾';
+            position: absolute;
+            right: 0.65rem;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #9ca3af;
+            font-size: 11px;
+        }
+
+        .custom-dropdown.disabled .custom-dropdown-btn {
+            opacity: 0.45;
+            cursor: not-allowed;
+        }
+
+        .custom-dropdown-menu {
+            position: absolute;
+            top: calc(100% + 0.3rem);
+            left: 0;
+            right: 0;
+            background: #0b1020;
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            border-radius: 0.75rem;
+            box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45);
+            overflow: hidden;
+            z-index: 1200;
+            display: none;
+        }
+
+        .custom-dropdown.open .custom-dropdown-menu {
+            display: block;
+        }
+
+        .custom-dropdown-option {
+            width: 100%;
+            text-align: left;
+            background: transparent;
+            color: #e5e7eb;
+            border: 0;
+            padding: 0.55rem 0.75rem;
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+
+        .custom-dropdown-option:hover,
+        .custom-dropdown-option.active {
+            background: rgba(59, 130, 246, 0.2);
+            color: #bfdbfe;
         }
 
         .view-section {
@@ -207,9 +244,7 @@
                     <input id="search-input" type="text" placeholder="Global Search..." 
                            class="bg-white/5 border border-white/5 rounded-full py-2 pl-10 pr-4 text-[11px] w-64 focus:outline-none focus:border-blue-500/50 transition-all font-medium">
                 </div>
-                <select id="search-console-filter" class="stable-select text-[10px] uppercase tracking-widest">
-                    <option value="">All Systems</option>
-                </select>
+                <div id="search-console-filter-container" class="custom-dropdown"></div>
                 <div id="current-time" class="text-[11px] font-bold tracking-widest text-white/40">00:00</div>
             </div>
         </header>
@@ -541,7 +576,8 @@
             isEmulating: false,
             localGames: [],
             selectedLocalGame: null,
-            consoles: []
+            consoles: [],
+            searchConsoleFilter: ''
         };
 
         function navTo(view) {
@@ -688,12 +724,76 @@
             populateSearchFilter();
         }
 
+        function closeAllCustomDropdowns() {
+            document.querySelectorAll('.custom-dropdown.open').forEach(el => el.classList.remove('open'));
+        }
+
+        function buildCustomDropdown({ options, value, onChange, disabled = false }) {
+            const root = document.createElement('div');
+            root.className = `custom-dropdown${disabled ? ' disabled' : ''}`;
+
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'custom-dropdown-btn';
+
+            const menu = document.createElement('div');
+            menu.className = 'custom-dropdown-menu';
+
+            let currentValue = value;
+            const optionMap = new Map(options.map(o => [o.value, o.label]));
+
+            function setActive(v) {
+                currentValue = v;
+                btn.textContent = optionMap.get(v) || options[0]?.label || '';
+                menu.querySelectorAll('.custom-dropdown-option').forEach(opt => {
+                    opt.classList.toggle('active', opt.dataset.value === v);
+                });
+            }
+
+            options.forEach(opt => {
+                const optionBtn = document.createElement('button');
+                optionBtn.type = 'button';
+                optionBtn.className = 'custom-dropdown-option';
+                optionBtn.dataset.value = opt.value;
+                optionBtn.textContent = opt.label;
+                optionBtn.addEventListener('click', () => {
+                    setActive(opt.value);
+                    root.classList.remove('open');
+                    if (onChange) onChange(opt.value);
+                });
+                menu.appendChild(optionBtn);
+            });
+
+            setActive(currentValue);
+
+            if (!disabled) {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const wasOpen = root.classList.contains('open');
+                    closeAllCustomDropdowns();
+                    if (!wasOpen) root.classList.add('open');
+                });
+            }
+
+            root.appendChild(btn);
+            root.appendChild(menu);
+            return root;
+        }
+
         function populateSearchFilter() {
-            const select = document.getElementById('search-console-filter');
-            if (!select) return;
-            const prev = select.value;
-            select.innerHTML = '<option value="">All Systems</option>' + state.consoles.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
-            if ([...select.options].some(o => o.value === prev)) select.value = prev;
+            const container = document.getElementById('search-console-filter-container');
+            if (!container) return;
+            const options = [{ value: '', label: 'All Systems' }, ...state.consoles.map(c => ({ value: c.id, label: c.name }))];
+            if (!options.some(o => o.value === state.searchConsoleFilter)) state.searchConsoleFilter = '';
+            container.innerHTML = '';
+            container.appendChild(buildCustomDropdown({
+                options,
+                value: state.searchConsoleFilter,
+                onChange: (nextValue) => {
+                    state.searchConsoleFilter = nextValue;
+                    if (document.getElementById('search-input').value.trim()) doSearch();
+                }
+            }));
         }
 
         async function rescanLibraryMetadata() {
@@ -774,10 +874,10 @@
             const renderToken = ++storeRenderToken;
             
             sectionsContainer.innerHTML = `<div class="py-20 text-center font-black text-white/10 italic animate-pulse uppercase tracking-[0.3em]">Querying Network Archive...</div>`;
-            status.textContent = `SEARCHING: "${q.toUpperCase()}" ${document.getElementById('search-console-filter')?.value ? `(FILTER: ${document.getElementById('search-console-filter').value.toUpperCase()})` : ""}`;
+            status.textContent = `SEARCHING: "${q.toUpperCase()}" ${state.searchConsoleFilter ? `(FILTER: ${state.searchConsoleFilter.toUpperCase()})` : ''}`;
 
             try {
-                const consoleFilter = document.getElementById('search-console-filter')?.value || '';
+                const consoleFilter = state.searchConsoleFilter || '';
                 const data = await API.search(q, consoleFilter || null);
                 if (renderToken !== storeRenderToken) return;
                 if (!data.games || data.games.length === 0) {
@@ -1220,40 +1320,45 @@
                 row.className = 'bg-white/5 rounded-xl px-4 py-3 border border-white/5 space-y-2';
                 row.innerHTML = `<p class="uppercase tracking-widest text-[10px]">${consoleEntry.name}</p>`;
 
-                const providerWrap = document.createElement('label');
+                const providerValue = settings.emulators[consoleEntry.id] || 'emulatorjs';
+                const providerWrap = document.createElement('div');
                 providerWrap.className = 'flex items-center justify-between gap-2';
-                providerWrap.innerHTML = `
-                    <span class="text-[10px] uppercase text-white/40">Provider</span>
-                    <select class="stable-select text-[10px] uppercase">
-                        <option value="emulatorjs">EmulatorJS</option>
-                        <option value="neptunjs">NeptunJS</option>
-                    </select>
-                `;
-                const providerSelect = providerWrap.querySelector('select');
-                providerSelect.value = settings.emulators[consoleEntry.id] || 'emulatorjs';
-                providerSelect.addEventListener('change', (e) => {
-                    settings.emulators[consoleEntry.id] = e.target.value;
-                    saveSettings(settings);
-                });
+                const providerLabel = document.createElement('span');
+                providerLabel.className = 'text-[10px] uppercase text-white/40';
+                providerLabel.textContent = 'Provider';
+                providerWrap.appendChild(providerLabel);
+                providerWrap.appendChild(buildCustomDropdown({
+                    options: [
+                        { value: 'emulatorjs', label: 'EmulatorJS' },
+                        { value: 'neptunjs', label: 'NeptunJS' }
+                    ],
+                    value: providerValue,
+                    onChange: (nextValue) => {
+                        settings.emulators[consoleEntry.id] = nextValue;
+                        saveSettings(settings);
+                        renderSettings();
+                    }
+                }));
                 row.appendChild(providerWrap);
 
                 const coreOptions = getCoreOptionsForConsole(consoleEntry.id);
                 if (coreOptions.length) {
-                    const coreWrap = document.createElement('label');
+                    const coreWrap = document.createElement('div');
                     coreWrap.className = 'flex items-center justify-between gap-2';
-                    coreWrap.innerHTML = `
-                        <span class="text-[10px] uppercase text-white/40">Core</span>
-                        <select class="stable-select text-[10px] uppercase"></select>
-                    `;
-                    const coreSelect = coreWrap.querySelector('select');
-                    coreSelect.innerHTML = `<option value="">Default</option>` + coreOptions.map(core => `<option value="${core}">${core}</option>`).join('');
-                    coreSelect.value = settings.emulatorJsCores[consoleEntry.id] || '';
-                    coreSelect.disabled = providerSelect.value !== 'emulatorjs';
-                    coreSelect.addEventListener('change', (e) => {
-                        if (e.target.value) settings.emulatorJsCores[consoleEntry.id] = e.target.value;
-                        else delete settings.emulatorJsCores[consoleEntry.id];
-                        saveSettings(settings);
-                    });
+                    const coreLabel = document.createElement('span');
+                    coreLabel.className = 'text-[10px] uppercase text-white/40';
+                    coreLabel.textContent = 'Core';
+                    coreWrap.appendChild(coreLabel);
+                    coreWrap.appendChild(buildCustomDropdown({
+                        options: [{ value: '', label: 'Default' }, ...coreOptions.map(core => ({ value: core, label: core }))],
+                        value: settings.emulatorJsCores[consoleEntry.id] || '',
+                        disabled: providerValue !== 'emulatorjs',
+                        onChange: (nextValue) => {
+                            if (nextValue) settings.emulatorJsCores[consoleEntry.id] = nextValue;
+                            else delete settings.emulatorJsCores[consoleEntry.id];
+                            saveSettings(settings);
+                        }
+                    }));
                     row.appendChild(coreWrap);
                 }
 
@@ -1294,8 +1399,9 @@
         }
 
         document.getElementById('search-input').addEventListener('keypress', (e) => e.key === 'Enter' && doSearch());
-        document.getElementById('search-console-filter').addEventListener('change', () => { if (document.getElementById('search-input').value.trim()) doSearch(); });
-        document.getElementById('btn-rescan-metadata').addEventListener('click', rescanLibraryMetadata);
+                document.getElementById('btn-rescan-metadata').addEventListener('click', rescanLibraryMetadata);
+
+        document.addEventListener('click', () => closeAllCustomDropdowns());
 
         document.addEventListener('DOMContentLoaded', () => {
             loadConsoleList();
