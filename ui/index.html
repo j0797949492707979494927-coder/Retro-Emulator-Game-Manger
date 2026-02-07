@@ -58,15 +58,23 @@
             height: 2rem;
             max-width: 220px;
             min-width: 140px;
-            background-color: rgba(2, 6, 23, 0.9);
+            padding: 0 2rem 0 0.75rem;
+            border-radius: 0.75rem;
+            background-color: rgba(2, 6, 23, 0.95);
             color: #e5e7eb;
-            border: 1px solid rgba(255, 255, 255, 0.12);
+            border: 1px solid rgba(255, 255, 255, 0.14);
             transition: none !important;
             transform: none !important;
             animation: none !important;
-            appearance: auto;
-            -webkit-appearance: menulist;
+            appearance: none;
+            -webkit-appearance: none;
             color-scheme: dark;
+            line-height: 1.1;
+            overflow: hidden;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%239ca3af' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 0.55rem center;
+            background-size: 0.85rem;
         }
 
         .stable-select:focus {
@@ -199,7 +207,7 @@
                     <input id="search-input" type="text" placeholder="Global Search..." 
                            class="bg-white/5 border border-white/5 rounded-full py-2 pl-10 pr-4 text-[11px] w-64 focus:outline-none focus:border-blue-500/50 transition-all font-medium">
                 </div>
-                <select id="search-console-filter" class="stable-select bg-white/5 border border-white/10 rounded-full px-3 text-[10px] uppercase tracking-widest text-white/70">
+                <select id="search-console-filter" class="stable-select text-[10px] uppercase tracking-widest">
                     <option value="">All Systems</option>
                 </select>
                 <div id="current-time" class="text-[11px] font-bold tracking-widest text-white/40">00:00</div>
@@ -1216,7 +1224,7 @@
                 providerWrap.className = 'flex items-center justify-between gap-2';
                 providerWrap.innerHTML = `
                     <span class="text-[10px] uppercase text-white/40">Provider</span>
-                    <select class="stable-select bg-black/40 border border-white/10 rounded-lg px-2 py-1 text-[10px] uppercase">
+                    <select class="stable-select text-[10px] uppercase">
                         <option value="emulatorjs">EmulatorJS</option>
                         <option value="neptunjs">NeptunJS</option>
                     </select>
@@ -1235,7 +1243,7 @@
                     coreWrap.className = 'flex items-center justify-between gap-2';
                     coreWrap.innerHTML = `
                         <span class="text-[10px] uppercase text-white/40">Core</span>
-                        <select class="stable-select bg-black/40 border border-white/10 rounded-lg px-2 py-1 text-[10px] uppercase"></select>
+                        <select class="stable-select text-[10px] uppercase"></select>
                     `;
                     const coreSelect = coreWrap.querySelector('select');
                     coreSelect.innerHTML = `<option value="">Default</option>` + coreOptions.map(core => `<option value="${core}">${core}</option>`).join('');
