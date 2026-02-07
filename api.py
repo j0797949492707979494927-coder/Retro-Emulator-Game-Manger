@@ -714,7 +714,7 @@ def run_download_job(job_id, rom_url, rom_name, console, game_url, media_id=None
 def apply_shared_array_buffer_headers(response):
     # Required for cores that depend on SharedArrayBuffer (e.g. PPSSPP via EmulatorJS).
     response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
-    response.headers["Cross-Origin-Embedder-Policy"] = "require-corp"
+    response.headers["Cross-Origin-Embedder-Policy"] = "credentialless"
     return response
 
 # ------------------------------
