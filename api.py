@@ -1,7 +1,9 @@
 from flask import Flask, jsonify, request, send_from_directory
 from bs4 import BeautifulSoup
 import json
+import base64
 import os, re, shutil, threading, urllib.parse, uuid, requests
+from datetime import datetime
 
 app = Flask(__name__, static_folder="ui", static_url_path="")
 
@@ -17,6 +19,33 @@ THEGAMESDB_PLATFORMS = {
     "n64": "3",
     "ps1": "10",
     "gba": "5",
+}
+
+VIMM_BASE_URL = "https://vimm.net/vault"
+VIMM_REQUEST_HEADERS = {"User-Agent": "Mozilla/5.0 (Retro-Emulator-Game-Manger/1.0)"}
+LOG_DIR = "logs"
+os.makedirs(LOG_DIR, exist_ok=True)
+
+VIMM_SYSTEM_MAP = {
+    "dendy": "NES",
+    "nes": "NES",
+    "snes": "SNES",
+    "n64": "N64",
+    "ps1": "PSX",
+    "ps2": "PS2",
+    "ps3": "PS3",
+    "gba": "GBA",
+    "gb": "GB",
+    "gbc": "GBC",
+    "nds": "DS",
+    "3ds": "3DS",
+    "wii": "Wii",
+    "gamecube": "GameCube",
+    "genesis": "Genesis",
+    "megadrive": "Genesis",
+    "xbox": "Xbox",
+    "xbox360": "Xbox360",
+    "psp": "PSP",
 }
 
 def has_cover_metadata(metadata):
@@ -41,6 +70,160 @@ def safe_url(url):
         url = "https:" + url
     # Do NOT quote the path, just return as-is
     return url
+
+def log_request(url, status_code):
+    now = datetime.now()
+    log_file = os.path.join(LOG_DIR, f"{now.strftime('%Y-%m-%d')}.log")
+    with open(log_file, "a", encoding="utf-8") as f:
+        f.write(f"[{now.strftime('%H:%M:%S')}] Requested URL: {url} | Status: {status_code}\n")
+
+def vimm_request(url, method="GET", **kwargs):
+    kwargs.setdefault("headers", VIMM_REQUEST_HEADERS)
+    kwargs.setdefault("timeout", 20)
+    response = requests.request(method, url, **kwargs)
+    log_request(response.url, response.status_code)
+    response.raise_for_status()
+    return response
+
+def vimm_system_for_console(console_id=None):
+    if not console_id:
+        return ""
+    return VIMM_SYSTEM_MAP.get((console_id or "").lower(), console_id)
+
+def search_vimm_games(query, console_id=None):
+    params = {
+        "mode": "adv",
+        "p": "list",
+        "q": query,
+        "system": vimm_system_for_console(console_id),
+        "sort": "Title",
+        "sortOrder": "ASC"
+    }
+    response = vimm_request(VIMM_BASE_URL + "/", params=params)
+    soup = BeautifulSoup(response.text, "html.parser")
+    games = []
+    rows = soup.find_all("tr")
+    for row in rows:
+        cols = row.find_all("td")
+        if len(cols) < 5:
+            continue
+        link = cols[0].find("a")
+        if not link:
+            continue
+        title = link.text.strip()
+        href = link.get("href", "")
+        game_url = urllib.parse.urljoin("https://vimm.net", href)
+        region_img = cols[1].find("img")
+        region = region_img.get('title') if region_img else "-"
+        version = cols[2].text.strip()
+        languages = cols[3].text.strip()
+        rating_link = cols[4].find("a")
+        rating = rating_link.text.strip() if rating_link else "-"
+        game_id = game_url.rstrip("/").split("/")[-1]
+        box_url = f"https://dl.vimm.net/image.php?type=box&id={game_id}" if game_id.isdigit() else None
+        games.append({
+            "title": title,
+            "link": game_url,
+            "thumbnail": box_url,
+            "console": vimm_system_for_console(console_id) or "VIMM Vault",
+            "console_id": (console_id or "vimm").lower(),
+            "genre": version,
+            "players": region,
+            "languages": languages,
+            "rating": rating,
+            "source": "vimm"
+        })
+    return games
+
+def parse_vimm_rom_page(html, url, console_id=None):
+    soup = BeautifulSoup(html, "html.parser")
+    data = {
+        "title": None,
+        "info": {},
+        "screenshots": [],
+        "downloads": [],
+        "description": None,
+        "thumbnail": None,
+        "console": vimm_system_for_console(console_id) or "VIMM Vault"
+    }
+
+    title_canvas = soup.find("canvas", id="canvas2")
+    if title_canvas and title_canvas.get("data-v"):
+        try:
+            data["title"] = base64.b64decode(title_canvas["data-v"]).decode("utf-8")
+        except Exception:
+            data["title"] = None
+
+    def get_row_value(name):
+        td = soup.find("td", string=name)
+        if not td:
+            return None
+        v1 = td.find_next_sibling("td")
+        v2 = v1.find_next_sibling("td") if v1 else None
+        return v2.get_text(" ", strip=True) if v2 else None
+
+    for key, label in (("players", "Players"), ("year", "Year"), ("graphics", "Graphics"), ("sound", "Sound"), ("gameplay", "Gameplay"), ("overall", "Overall")):
+        value = get_row_value(label)
+        if value:
+            data["info"][key] = value
+
+    for key, span_id in (("crc", "data-crc"), ("md5", "data-md5"), ("sha1", "data-sha1"), ("verified", "data-date")):
+        node = soup.find("span", id=span_id)
+        if node and node.text.strip():
+            data["info"][key] = node.text.strip()
+
+    game_id = url.rstrip("/").split("/")[-1]
+    if game_id.isdigit():
+        data["thumbnail"] = f"https://dl.vimm.net/image.php?type=box&id={game_id}"
+        data["screenshots"].append(f"https://dl.vimm.net/image.php?type=screen&id={game_id}")
+
+    dl_form = soup.find("form", id="dl_form")
+    media_id = None
+    if dl_form:
+        media_input = dl_form.find("input", {"name": "mediaId"})
+        media_id = media_input.get("value") if media_input else None
+
+    rom_name = f"{(data.get('title') or game_id or 'rom').strip()}.zip"
+    rom_name = sanitize_filename(rom_name)
+    if media_id:
+        encoded_game = urllib.parse.quote(url, safe='')
+        encoded_name = urllib.parse.quote(rom_name, safe='')
+        encoded_media = urllib.parse.quote(media_id, safe='')
+        encoded_console = urllib.parse.quote((console_id or "misc"), safe='')
+        data["downloads"].append({
+            "name": rom_name,
+            "local": False,
+            "download_url": f"/download?mediaId={encoded_media}&filename={encoded_name}&console={encoded_console}&game_url={encoded_game}"
+        })
+
+    return data
+
+def resolve_vimm_download_url(game_url, media_id=None):
+    response = vimm_request(game_url)
+    soup = BeautifulSoup(response.text, "html.parser")
+    dl_form = soup.find("form", id="dl_form")
+    if not dl_form:
+        return None
+
+    action = urllib.parse.urljoin("https://vimm.net", dl_form.get("action") or game_url)
+    payload = {}
+    for field in dl_form.find_all("input"):
+        name = field.get("name")
+        if not name:
+            continue
+        payload[name] = field.get("value", "")
+    if media_id:
+        payload["mediaId"] = media_id
+
+    submit = vimm_request(action, method="POST", data=payload, allow_redirects=False)
+    location = submit.headers.get("Location")
+    if location:
+        return urllib.parse.urljoin(action, location)
+    if submit.url != action:
+        return submit.url
+
+    match = re.search(r"https?://[^\"'\s]+", submit.text)
+    return match.group(0) if match else None
 
 # ------------------------------
 # Search page parser (corrected)
@@ -114,7 +297,9 @@ def parse_search(html):
 
 # ------------------------------
 # Game page parser
-def parse_game(html, url):
+def parse_game(html, url, console_hint=None):
+    if "vimm.net" in (url or ""):
+        return parse_vimm_rom_page(html, url, console_id=console_hint)
     soup = BeautifulSoup(html, "html.parser")
     title_node = soup.select_one(".rheader h1")
     info_nodes = soup.select("ul.finfo li")
@@ -375,20 +560,47 @@ def enrich_metadata(game_folder, base_name, console_id, seed_title=None):
     metadata_path = os.path.join(game_folder, "metadata.json")
     existing = load_local_metadata(metadata_path) or {}
     title = seed_title or existing.get("title") or base_name
+    merged = dict(existing)
+
+    # Prefer VIMM data first (default market), then merge with TheGamesDB enrichment.
+    source_url = (existing.get("source_url") or "").strip()
+    vimm_url = source_url if "vimm.net" in source_url else None
+    if not vimm_url and title:
+        try:
+            vimm_candidates = search_vimm_games(title, console_id=console_id)
+            vimm_url = vimm_candidates[0]["link"] if vimm_candidates else None
+        except requests.RequestException:
+            vimm_url = None
+
+    if vimm_url:
+        try:
+            vimm_html = vimm_request(vimm_url).text
+            vimm_data = parse_vimm_rom_page(vimm_html, vimm_url, console_id=console_id)
+            vimm_incoming = {
+                "title": vimm_data.get("title"),
+                "players": (vimm_data.get("info") or {}).get("players"),
+                "release_date": (vimm_data.get("info") or {}).get("year"),
+                "cover_front": vimm_data.get("thumbnail"),
+                "fanart": vimm_data.get("screenshots") or [],
+                "url": vimm_url
+            }
+            merged = merge_metadata(merged, vimm_incoming)
+        except requests.RequestException:
+            pass
+
     platform_id = THEGAMESDB_PLATFORMS.get(console_id)
     try:
         results = search_thegamesdb(title, platform_id=platform_id, limit=1)
     except requests.RequestException:
-        return existing
-    if not results:
-        return existing
+        results = []
 
-    try:
-        incoming = scrape_thegamesdb_details(results[0]["url"])
-    except requests.RequestException:
-        return existing
+    if results:
+        try:
+            incoming = scrape_thegamesdb_details(results[0]["url"])
+            merged = merge_metadata(merged, incoming)
+        except requests.RequestException:
+            pass
 
-    merged = merge_metadata(existing, incoming)
     assets_dir = os.path.join(game_folder, "assets")
     os.makedirs(assets_dir, exist_ok=True)
 
@@ -437,7 +649,7 @@ def list_consoles():
         return []
     return sorted([name for name in os.listdir(ROM_DIR) if os.path.isdir(os.path.join(ROM_DIR, name))])
 
-def run_download_job(job_id, rom_url, rom_name, console, game_url):
+def run_download_job(job_id, rom_url, rom_name, console, game_url, media_id=None):
     download_jobs[job_id]["status"] = "downloading"
     try:
         folder = os.path.join(ROM_DIR, console)
@@ -447,6 +659,11 @@ def run_download_job(job_id, rom_url, rom_name, console, game_url):
         game_folder = os.path.join(folder, base_name)
         os.makedirs(game_folder, exist_ok=True)
         file_path = os.path.join(game_folder, safe_rom_name)
+
+        if not rom_url and media_id and game_url:
+            rom_url = resolve_vimm_download_url(game_url, media_id=media_id)
+        if not rom_url:
+            raise ValueError("Unable to resolve download URL")
 
         if not os.path.isfile(file_path):
             with requests.get(rom_url, headers={"User-Agent": "Mozilla/5.0"}, stream=True) as r:
@@ -458,7 +675,7 @@ def run_download_job(job_id, rom_url, rom_name, console, game_url):
         if game_url:
             try:
                 html = curl_get(game_url)
-                game_data = parse_game(html, game_url)
+                game_data = parse_game(html, game_url, console_hint=console)
             except requests.RequestException:
                 game_data = None
 
@@ -487,7 +704,7 @@ def run_download_job(job_id, rom_url, rom_name, console, game_url):
                     json.dump(merged, f, ensure_ascii=False, indent=2)
                 enrich_metadata(game_folder, base_name, console, seed_title=merged.get("title"))
         download_jobs[job_id]["status"] = "complete"
-    except requests.RequestException as exc:
+    except Exception as exc:
         download_jobs[job_id]["status"] = "error"
         download_jobs[job_id]["error"] = str(exc)
 
@@ -509,10 +726,25 @@ def index():
 @app.route("/search")
 def search():
     q = request.args.get("q", "").strip()
+    console = request.args.get("console", "").strip().lower() or None
+    if not q:
+        return jsonify({"status": "ok", "games": []})
+
+    # Default market source is VIMM; fall back to Emu-Land when unavailable.
+    try:
+        vimm_games = search_vimm_games(q, console_id=console)
+        if vimm_games:
+            return jsonify({"status": "ok", "games": vimm_games, "source": "vimm"})
+    except requests.RequestException:
+        pass
+
     url = f"https://www.emu-land.net/en/search_games?id=all&genre=--&players=--&q={q}"
-    html = curl_get(url)
-    games = parse_search(html)
-    return jsonify({"status":"ok","games":games})
+    try:
+        html = curl_get(url)
+        games = parse_search(html)
+    except requests.RequestException:
+        games = []
+    return jsonify({"status":"ok","games":games, "source": "emuland"})
 
 @app.route("/game")
 def game_page():
@@ -520,22 +752,23 @@ def game_page():
     if not url:
         return jsonify({"status":"error","message":"Missing URL"}), 400
     html = curl_get(url)
-    game = parse_game(html, url)
+    game = parse_game(html, url, console_hint=request.args.get("console"))
     return jsonify({"status":"ok","game":game})
 
 @app.route("/download")
 def download_rom():
     rom_url = request.args.get("url")
+    media_id = request.args.get("mediaId")
     rom_name = request.args.get("filename")
     console = request.args.get("console", "misc")
     game_url = request.args.get("game_url")
-    if not rom_url or not rom_name:
+    if (not rom_url and not media_id) or not rom_name:
         return jsonify({"error": "Missing parameters"}), 400
     job_id = str(uuid.uuid4())
     download_jobs[job_id] = {"status": "queued", "error": None}
     thread = threading.Thread(
         target=run_download_job,
-        args=(job_id, rom_url, rom_name, console, game_url),
+        args=(job_id, rom_url, rom_name, console, game_url, media_id),
         daemon=True
     )
     thread.start()
@@ -625,10 +858,20 @@ def market_cover():
     console = request.args.get("console")
     if not title:
         return jsonify({"status": "error", "message": "Missing title"}), 400
+
+    cover = None
     try:
-        cover = get_thegamesdb_cover(title, console_id=console)
+        vimm_results = search_vimm_games(title, console_id=console)
+        if vimm_results and vimm_results[0].get("thumbnail"):
+            cover = vimm_results[0]["thumbnail"]
     except requests.RequestException:
         cover = None
+
+    if not cover:
+        try:
+            cover = get_thegamesdb_cover(title, console_id=console)
+        except requests.RequestException:
+            cover = None
     return jsonify({"status": "ok", "cover": cover})
 
 @app.route("/addons")
