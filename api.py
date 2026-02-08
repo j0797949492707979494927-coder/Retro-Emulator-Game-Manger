@@ -445,34 +445,39 @@ def parse_vimm_search_html(html, console_label=None):
     rows = soup.find_all("tr")
     for row in rows:
         cols = row.find_all("td")
-        # VIMM result rows contain 5 columns (title/region/version/lang/rating).
-        # Smaller rows are usually console/category navigation and should be ignored.
+        # Result rows should include at least: console/title/region/version/languages/rating.
         if len(cols) < 5:
             continue
-        link = cols[0].find("a") if cols else None
+
+        # VIMM often places console in col[0] and title/link in col[1], so do not assume
+        # the first column contains the game link.
+        link = row.select_one('a[href*="/vault/"]')
         if not link:
             continue
-        href = link.get("href", "")
+
+        href = (link.get("href") or "").strip()
         if not href or href.startswith("#") or href.lower().startswith("javascript:"):
             continue
+
         title = link.get_text(" ", strip=True)
         if not title:
             continue
+
         game_url = urllib.parse.urljoin(VIMM_BASE_URL + "/", href)
         if "/vault" not in urllib.parse.urlparse(game_url).path:
             continue
 
+        # Parse supporting fields with flexible indexing so both 5-col and 6-col layouts work.
         region = "-"
-        version = "-"
-        languages = "-"
-        rating = "-"
-        if len(cols) >= 5:
-            region_img = cols[1].find("img")
-            region = region_img.get('title') if region_img else "-"
-            version = cols[2].get_text(" ", strip=True)
-            languages = cols[3].get_text(" ", strip=True)
-            rating_link = cols[4].find("a")
-            rating = rating_link.get_text(" ", strip=True) if rating_link else "-"
+        region_img = row.select_one("img.flag") or row.select_one('td img[title]')
+        if region_img:
+            region = region_img.get("title") or "-"
+
+        version = cols[-3].get_text(" ", strip=True) if len(cols) >= 3 else "-"
+        languages = cols[-2].get_text(" ", strip=True) if len(cols) >= 2 else "-"
+        rating_link = cols[-1].find("a") if cols else None
+        rating = rating_link.get_text(" ", strip=True) if rating_link else cols[-1].get_text(" ", strip=True)
+        rating = rating or "-"
 
         game_id = game_url.rstrip("/").split("/")[-1]
         box_url = f"https://dl.vimm.net/image.php?type=box&id={game_id}" if game_id.isdigit() else None
@@ -488,8 +493,6 @@ def parse_vimm_search_html(html, console_label=None):
             "rating": rating,
             "source": "vimm"
         })
-
-    # Keep parsing strict to avoid ingesting console/category navigation links.
 
     # dedupe by link
     out = []
