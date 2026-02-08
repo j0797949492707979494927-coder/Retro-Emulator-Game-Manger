@@ -362,7 +362,7 @@
 
     <script>
         const API = {
-            search: (q, consoleId) => { const params = new URLSearchParams({ q }); if (consoleId) params.set('console', consoleId); return fetch(`/search?${params.toString()}`).then(r => r.json()); },
+            search: (q, consoleId, stores) => { const params = new URLSearchParams({ q }); if (consoleId) params.set('console', consoleId); if (stores?.length) params.set('stores', stores.join(',')); return fetch(`/search?${params.toString()}`).then(r => r.json()); },
             getGame: (url) => fetch(`/game?url=${encodeURIComponent(url)}`).then(r => r.json()),
             getMarketCover: (title, console, coverSources) => { const params = new URLSearchParams({ title, console: console || '' }); if (coverSources?.length) params.set('cover_sources', coverSources.join(',')); return fetch(`/market_cover?${params.toString()}`).then(r => r.json()); },
             listLocal: (console) => fetch(`/list_console?console=${console}`).then(r => r.json()),
@@ -882,9 +882,21 @@
             status.textContent = `SEARCHING: "${q.toUpperCase()}" ${state.searchConsoleFilter ? `(FILTER: ${state.searchConsoleFilter.toUpperCase()})` : ''}`;
 
             try {
+                const settings = getSettings();
+                const activeStores = Object.entries(settings.stores || {}).filter(([_, enabled]) => !!enabled).map(([key]) => key);
+                if (!activeStores.length) {
+                    status.textContent = 'NO MARKET SOURCE ENABLED';
+                    sectionsContainer.innerHTML = `<div class="py-20 text-center font-black text-yellow-400/70 italic uppercase tracking-[0.2em]">Enable at least one Marketplace Source in Settings.</div>`;
+                    return;
+                }
+
                 const consoleFilter = state.searchConsoleFilter || '';
-                const data = await API.search(q, consoleFilter || null);
+                const data = await API.search(q, consoleFilter || null, activeStores);
                 if (renderToken !== storeRenderToken) return;
+                if (data.status === 'error') {
+                    sectionsContainer.innerHTML = `<div class="py-20 text-center font-black text-yellow-400/70 italic uppercase tracking-[0.2em]">${data.message || 'Search source unavailable.'}</div>`;
+                    return;
+                }
                 if (!data.games || data.games.length === 0) {
                     sectionsContainer.innerHTML = `<div class="py-20 text-center font-black text-white/10 italic uppercase tracking-[0.2em]">Zero results found in global cache.</div>`;
                     return;
@@ -944,17 +956,17 @@
                 const data = await API.getGame(url);
                 const game = data.game;
                 let marketCover = game.thumbnail;
-                if (!marketCover) {
-                    try {
-                        const coverSources = Object.entries(getSettings().coverSources || {}).filter(([_, enabled]) => !!enabled).map(([key]) => key);
+                try {
+                    const coverSources = Object.entries(getSettings().coverSources || {}).filter(([_, enabled]) => !!enabled).map(([key]) => key);
+                    if (coverSources.length) {
                         const coverResponse = await API.getMarketCover(game.title, game.console, coverSources);
                         if (coverResponse?.cover) {
                             marketCover = coverResponse.cover;
                         } else if (coverResponse?.screenshots?.length) {
                             marketCover = coverResponse.screenshots[0];
                         }
-                    } catch (e) {}
-                }
+                    }
+                } catch (e) {}
                 
                 const infoHtml = Object.entries(game.info).map(([k, v]) => `
                     <div class="flex justify-between items-center text-[10px] py-1.5 border-b border-white/5">

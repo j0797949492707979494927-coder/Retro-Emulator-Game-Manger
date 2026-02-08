@@ -940,24 +940,34 @@ def index():
 def search():
     q = request.args.get("q", "").strip()
     console = request.args.get("console", "").strip().lower() or None
+    stores_raw = request.args.get("stores", "")
+    stores = [part.strip().lower() for part in stores_raw.split(",") if part.strip()]
+    enabled_stores = stores or ["vimm", "emuland"]
+
     if not q:
-        return jsonify({"status": "ok", "games": []})
+        return jsonify({"status": "ok", "games": [], "stores": enabled_stores})
 
-    # Default market source is VIMM; fall back to Emu-Land when unavailable.
-    try:
-        vimm_games = search_vimm_games(q, console_id=console)
-        if vimm_games:
-            return jsonify({"status": "ok", "games": vimm_games, "source": "vimm"})
-    except requests.RequestException:
-        pass
+    if not enabled_stores:
+        return jsonify({"status": "error", "message": "No store sources enabled", "games": []})
 
-    url = f"https://www.emu-land.net/en/search_games?id=all&genre=--&players=--&q={q}"
-    try:
-        html = curl_get(url)
-        games = parse_search(html)
-    except requests.RequestException:
-        games = []
-    return jsonify({"status":"ok","games":games, "source": "emuland"})
+    if "vimm" in enabled_stores:
+        try:
+            vimm_games = search_vimm_games(q, console_id=console)
+            if vimm_games:
+                return jsonify({"status": "ok", "games": vimm_games, "source": "vimm", "stores": enabled_stores})
+        except requests.RequestException:
+            pass
+
+    if "emuland" in enabled_stores:
+        url = f"https://www.emu-land.net/en/search_games?id=all&genre=--&players=--&q={q}"
+        try:
+            html = curl_get(url)
+            games = parse_search(html)
+        except requests.RequestException:
+            games = []
+        return jsonify({"status":"ok","games":games, "source": "emuland", "stores": enabled_stores})
+
+    return jsonify({"status": "ok", "games": [], "source": "none", "stores": enabled_stores})
 
 @app.route("/game")
 def game_page():
