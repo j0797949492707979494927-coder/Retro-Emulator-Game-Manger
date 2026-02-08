@@ -426,6 +426,18 @@ def vimm_system_for_console(console_id=None):
     return VIMM_SYSTEM_MAP.get((console_id or "").lower(), console_id)
 
 
+def sanitize_vimm_query(query):
+    raw = (query or "").strip()
+    if not raw:
+        return ""
+    normalized = re.sub(r"[\/:;|]+", " ", raw)
+    normalized = re.sub(r"[^\w\s\-']", " ", normalized, flags=re.UNICODE)
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    if not normalized:
+        return raw
+    return normalized[:96]
+
+
 def parse_vimm_search_html(html, console_label=None):
     soup = BeautifulSoup(html, "html.parser")
     games = []
@@ -433,13 +445,15 @@ def parse_vimm_search_html(html, console_label=None):
     rows = soup.find_all("tr")
     for row in rows:
         cols = row.find_all("td")
-        if len(cols) < 1:
+        # VIMM result rows contain 5 columns (title/region/version/lang/rating).
+        # Smaller rows are usually console/category navigation and should be ignored.
+        if len(cols) < 5:
             continue
         link = cols[0].find("a") if cols else None
         if not link:
             continue
         href = link.get("href", "")
-        if "/vault/" not in href:
+        if not href or "/vault/" not in href:
             continue
         title = link.get_text(" ", strip=True)
         if not title:
@@ -473,33 +487,7 @@ def parse_vimm_search_html(html, console_label=None):
             "source": "vimm"
         })
 
-    # fallback parse for simpler layouts without table metadata
-    if not games:
-        anchors = soup.select('a[href*="/vault/"]')
-        for link in anchors:
-            href = link.get("href", "")
-            text = link.get_text(" ", strip=True)
-            if not href or not text or len(text) < 2:
-                continue
-            if text.lower() in {"next", "prev", "previous", "home"}:
-                continue
-            game_url = urllib.parse.urljoin("https://vimm.net", href)
-            if "/vault/" not in game_url:
-                continue
-            game_id = game_url.rstrip("/").split("/")[-1]
-            box_url = f"https://dl.vimm.net/image.php?type=box&id={game_id}" if game_id.isdigit() else None
-            games.append({
-                "title": text,
-                "link": game_url,
-                "thumbnail": box_url,
-                "console": console_label or "VIMM Vault",
-                "console_id": normalize_text(console_label or "vimm") or "vimm",
-                "genre": "-",
-                "players": "-",
-                "languages": "-",
-                "rating": "-",
-                "source": "vimm"
-            })
+    # Keep parsing strict to avoid ingesting console/category navigation links.
 
     # dedupe by link
     out = []
@@ -514,23 +502,39 @@ def parse_vimm_search_html(html, console_label=None):
 
 def search_vimm_games(query, console_id=None, diagnostics=None):
     console_label = vimm_system_for_console(console_id)
+
+    query_candidates = []
+    original_query = (query or "").strip()
+    if original_query:
+        query_candidates.append(original_query)
+    sanitized_query = sanitize_vimm_query(original_query)
+    if sanitized_query and sanitized_query not in query_candidates:
+        query_candidates.append(sanitized_query)
+
     base_params = {
         "mode": "adv",
         "p": "list",
-        "q": query,
         "sort": "Title",
         "sortOrder": "ASC"
     }
 
     attempts = []
-    if console_label:
-        attempts.append({**base_params, "system": console_label})
-    attempts.append({**base_params, "system": ""})
+    systems = [console_label] if console_label else []
+    systems.append("")
+
+    for query_text in query_candidates or [""]:
+        for system in systems:
+            params = dict(base_params)
+            params["q"] = query_text
+            if system:
+                params["system"] = system
+            attempts.append(params)
 
     if diagnostics is not None:
         diagnostics.append({
             "event": "start",
             "query": query,
+            "query_candidates": query_candidates,
             "console_id": console_id,
             "attempts": len(attempts)
         })
@@ -544,6 +548,7 @@ def search_vimm_games(query, console_id=None, diagnostics=None):
                     "event": "attempt_result",
                     "url": response.url,
                     "system": params.get("system", ""),
+                    "query": params.get("q", ""),
                     "game_count": len(games)
                 })
             if games:
@@ -551,11 +556,24 @@ def search_vimm_games(query, console_id=None, diagnostics=None):
                     for g in games:
                         g["console_id"] = (console_id or "vimm").lower()
                 return games
+        except requests.HTTPError as exc:
+            status_code = exc.response.status_code if getattr(exc, "response", None) else None
+            if diagnostics is not None:
+                diagnostics.append({
+                    "event": "attempt_http_error",
+                    "system": params.get("system", ""),
+                    "query": params.get("q", ""),
+                    "status": status_code,
+                    "error": str(exc)
+                })
+            if status_code == 404:
+                continue
         except requests.RequestException as exc:
             if diagnostics is not None:
                 diagnostics.append({
                     "event": "attempt_error",
                     "system": params.get("system", ""),
+                    "query": params.get("q", ""),
                     "error": str(exc)
                 })
             continue
