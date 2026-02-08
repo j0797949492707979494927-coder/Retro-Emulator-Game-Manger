@@ -453,12 +453,14 @@ def parse_vimm_search_html(html, console_label=None):
         if not link:
             continue
         href = link.get("href", "")
-        if not href or "/vault/" not in href:
+        if not href or href.startswith("#") or href.lower().startswith("javascript:"):
             continue
         title = link.get_text(" ", strip=True)
         if not title:
             continue
-        game_url = urllib.parse.urljoin("https://vimm.net", href)
+        game_url = urllib.parse.urljoin(VIMM_BASE_URL + "/", href)
+        if "/vault" not in urllib.parse.urlparse(game_url).path:
+            continue
 
         region = "-"
         version = "-"
