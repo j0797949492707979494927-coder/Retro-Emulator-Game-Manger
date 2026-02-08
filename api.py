@@ -395,50 +395,118 @@ def vimm_system_for_console(console_id=None):
         return ""
     return VIMM_SYSTEM_MAP.get((console_id or "").lower(), console_id)
 
-def search_vimm_games(query, console_id=None):
-    params = {
-        "mode": "adv",
-        "p": "list",
-        "q": query,
-        "system": vimm_system_for_console(console_id),
-        "sort": "Title",
-        "sortOrder": "ASC"
-    }
-    response = vimm_request(VIMM_BASE_URL + "/", params=params)
-    soup = BeautifulSoup(response.text, "html.parser")
+
+def parse_vimm_search_html(html, console_label=None):
+    soup = BeautifulSoup(html, "html.parser")
     games = []
+
     rows = soup.find_all("tr")
     for row in rows:
         cols = row.find_all("td")
-        if len(cols) < 5:
+        if len(cols) < 1:
             continue
-        link = cols[0].find("a")
+        link = cols[0].find("a") if cols else None
         if not link:
             continue
-        title = link.text.strip()
         href = link.get("href", "")
+        if "/vault/" not in href:
+            continue
+        title = link.get_text(" ", strip=True)
+        if not title:
+            continue
         game_url = urllib.parse.urljoin("https://vimm.net", href)
-        region_img = cols[1].find("img")
-        region = region_img.get('title') if region_img else "-"
-        version = cols[2].text.strip()
-        languages = cols[3].text.strip()
-        rating_link = cols[4].find("a")
-        rating = rating_link.text.strip() if rating_link else "-"
+
+        region = "-"
+        version = "-"
+        languages = "-"
+        rating = "-"
+        if len(cols) >= 5:
+            region_img = cols[1].find("img")
+            region = region_img.get('title') if region_img else "-"
+            version = cols[2].get_text(" ", strip=True)
+            languages = cols[3].get_text(" ", strip=True)
+            rating_link = cols[4].find("a")
+            rating = rating_link.get_text(" ", strip=True) if rating_link else "-"
+
         game_id = game_url.rstrip("/").split("/")[-1]
         box_url = f"https://dl.vimm.net/image.php?type=box&id={game_id}" if game_id.isdigit() else None
         games.append({
             "title": title,
             "link": game_url,
             "thumbnail": box_url,
-            "console": vimm_system_for_console(console_id) or "VIMM Vault",
-            "console_id": (console_id or "vimm").lower(),
+            "console": console_label or "VIMM Vault",
+            "console_id": normalize_text(console_label or "vimm") or "vimm",
             "genre": version,
             "players": region,
             "languages": languages,
             "rating": rating,
             "source": "vimm"
         })
-    return games
+
+    # fallback parse for simpler layouts without table metadata
+    if not games:
+        anchors = soup.select('a[href*="/vault/"]')
+        for link in anchors:
+            href = link.get("href", "")
+            text = link.get_text(" ", strip=True)
+            if not href or not text or len(text) < 2:
+                continue
+            if text.lower() in {"next", "prev", "previous", "home"}:
+                continue
+            game_url = urllib.parse.urljoin("https://vimm.net", href)
+            if "/vault/" not in game_url:
+                continue
+            game_id = game_url.rstrip("/").split("/")[-1]
+            box_url = f"https://dl.vimm.net/image.php?type=box&id={game_id}" if game_id.isdigit() else None
+            games.append({
+                "title": text,
+                "link": game_url,
+                "thumbnail": box_url,
+                "console": console_label or "VIMM Vault",
+                "console_id": normalize_text(console_label or "vimm") or "vimm",
+                "genre": "-",
+                "players": "-",
+                "languages": "-",
+                "rating": "-",
+                "source": "vimm"
+            })
+
+    # dedupe by link
+    out = []
+    seen = set()
+    for game in games:
+        link = game.get("link")
+        if not link or link in seen:
+            continue
+        seen.add(link)
+        out.append(game)
+    return out
+
+def search_vimm_games(query, console_id=None):
+    console_label = vimm_system_for_console(console_id)
+    base_params = {
+        "mode": "adv",
+        "p": "list",
+        "q": query,
+        "sort": "Title",
+        "sortOrder": "ASC"
+    }
+
+    attempts = []
+    if console_label:
+        attempts.append({**base_params, "system": console_label})
+    attempts.append({**base_params, "system": ""})
+
+    for params in attempts:
+        response = vimm_request(VIMM_BASE_URL + "/", params=params)
+        games = parse_vimm_search_html(response.text, console_label=console_label or "VIMM Vault")
+        if games:
+            if console_id:
+                for g in games:
+                    g["console_id"] = (console_id or "vimm").lower()
+            return games
+
+    return []
 
 def parse_vimm_rom_page(html, url, console_id=None):
     soup = BeautifulSoup(html, "html.parser")
