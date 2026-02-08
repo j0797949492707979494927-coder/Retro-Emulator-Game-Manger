@@ -50,18 +50,105 @@
             border-radius: 10px;
         }
 
+        .settings-scroll {
+            scrollbar-gutter: stable;
+        }
+
+        .custom-dropdown {
+            position: relative;
+            min-width: 150px;
+        }
+
+        .custom-dropdown-btn {
+            width: 100%;
+            height: 2rem;
+            padding: 0 2rem 0 0.75rem;
+            border-radius: 0.75rem;
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            background: rgba(2, 6, 23, 0.95);
+            color: #e5e7eb;
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            text-align: left;
+            position: relative;
+        }
+
+        .custom-dropdown-btn::after {
+            content: '▾';
+            position: absolute;
+            right: 0.65rem;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #9ca3af;
+            font-size: 11px;
+        }
+
+        .custom-dropdown.disabled .custom-dropdown-btn {
+            opacity: 0.45;
+            cursor: not-allowed;
+        }
+
+        .custom-dropdown-menu {
+            position: absolute;
+            top: calc(100% + 0.3rem);
+            left: 0;
+            right: 0;
+            background: #0b1020;
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            border-radius: 0.75rem;
+            box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45);
+            overflow: hidden;
+            z-index: 1200;
+            display: none;
+        }
+
+        .custom-dropdown.open .custom-dropdown-menu {
+            display: block;
+        }
+
+        .custom-dropdown-option {
+            width: 100%;
+            text-align: left;
+            background: transparent;
+            color: #e5e7eb;
+            border: 0;
+            padding: 0.55rem 0.75rem;
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+
+        .custom-dropdown-option:hover,
+        .custom-dropdown-option.active {
+            background: rgba(59, 130, 246, 0.2);
+            color: #bfdbfe;
+        }
+
         .view-section {
             transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
         }
 
         .console-card, .game-card {
-            transition: transform 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease;
+            transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+            transform: translateZ(0);
+            backface-visibility: hidden;
+            will-change: transform;
         }
 
         .console-card:hover, .game-card:hover {
-            transform: translateY(-4px);
+            transform: translate3d(0, -2px, 0);
             box-shadow: 0 10px 30px -15px rgba(59, 130, 246, 0.4);
             border-color: rgba(59, 130, 246, 0.3);
+        }
+
+        .media-loading {
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .media-loaded {
+            opacity: 1;
         }
 
         .bg-glow {
@@ -117,6 +204,10 @@
                 <i data-lucide="shopping-bag" size="20"></i>
                 <span class="font-semibold text-sm">Marketplace</span>
             </button>
+            <button onclick="navTo('SETTINGS')" id="btn-settings" class="w-full flex items-center gap-4 px-4 py-3 rounded-xl transition-all text-white/40 hover:text-white hover:bg-white/5">
+                <i data-lucide="settings" size="20"></i>
+                <span class="font-semibold text-sm">Settings</span>
+            </button>
             <button class="w-full flex items-center gap-4 px-4 py-3 rounded-xl transition-all text-white/40 hover:text-white hover:bg-white/5">
                 <i data-lucide="star" size="20"></i>
                 <span class="font-semibold text-sm">Favorites</span>
@@ -153,6 +244,7 @@
                     <input id="search-input" type="text" placeholder="Global Search..." 
                            class="bg-white/5 border border-white/5 rounded-full py-2 pl-10 pr-4 text-[11px] w-64 focus:outline-none focus:border-blue-500/50 transition-all font-medium">
                 </div>
+                <div id="search-console-filter-container" class="custom-dropdown"></div>
                 <div id="current-time" class="text-[11px] font-bold tracking-widest text-white/40">00:00</div>
             </div>
         </header>
@@ -207,6 +299,42 @@
             </div>
         </section>
 
+        <!-- Settings View -->
+        <section id="view-settings" class="hidden flex-1 p-8 overflow-y-auto custom-scroll view-section settings-scroll">
+            <div class="mb-8 animate-fade">
+                <h2 class="text-4xl font-black tracking-tighter mb-2 uppercase italic">SYSTEM <span class="text-blue-500">SETTINGS</span></h2>
+                <p class="text-white/30 text-xs font-medium uppercase tracking-widest">Configure stores, covers, and addons</p>
+            </div>
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div class="glass rounded-3xl p-6 border border-white/5 space-y-4">
+                    <h3 class="text-sm font-bold uppercase tracking-widest text-white/60">Marketplace Sources</h3>
+                    <div id="settings-stores" class="space-y-3 text-xs text-white/60"></div>
+                </div>
+                <div class="glass rounded-3xl p-6 border border-white/5 space-y-4">
+                    <h3 class="text-sm font-bold uppercase tracking-widest text-white/60">Cover Art Sources</h3>
+                    <div id="settings-covers" class="space-y-3 text-xs text-white/60"></div>
+                </div>
+                <div class="glass rounded-3xl p-6 border border-white/5 space-y-4">
+                    <h3 class="text-sm font-bold uppercase tracking-widest text-white/60">Local Library Art Sources</h3>
+                    <p class="text-[11px] text-white/40">Choose sources used when updating local metadata and artwork.</p>
+                    <div id="settings-local-covers" class="space-y-3 text-xs text-white/60"></div>
+                </div>
+                <div class="glass rounded-3xl p-6 border border-white/5 space-y-4 lg:col-span-2">
+                    <h3 class="text-sm font-bold uppercase tracking-widest text-white/60">Emulator Providers</h3>
+                    <div id="settings-emulators" class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs text-white/60"></div>
+                </div>
+                <div class="glass rounded-3xl p-6 border border-white/5 space-y-4 lg:col-span-2">
+                    <div class="flex items-center justify-between gap-3">
+                        <h3 class="text-sm font-bold uppercase tracking-widest text-white/60">Add-ons</h3>
+                        <button id="btn-rescan-metadata" class="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-[10px] font-black uppercase tracking-widest transition-all">Rescan Library Metadata</button>
+                        <button id="btn-update-local-files" class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-[10px] font-black uppercase tracking-widest transition-all">Update Local Files</button>
+                    </div>
+                    <p class="text-[11px] text-white/40">Drop addon folders into <span class="text-white/70">/addons</span> to extend functionality.</p>
+                    <div id="settings-addons" class="flex flex-wrap gap-2 text-[10px] uppercase"></div>
+                </div>
+            </div>
+        </section>
+
         <!-- Footer Bar -->
         <footer class="h-10 border-t border-white/5 flex items-center justify-between px-6 text-[9px] font-black uppercase tracking-[0.2em] text-white/20 bg-black/60">
             <div class="flex gap-6">
@@ -238,13 +366,60 @@
         </div>
     </div>
 
+    <div id="edit-game-modal" class="fixed inset-0 hidden items-center justify-center bg-black/70 z-[1400] p-6">
+        <div class="w-full max-w-5xl glass border border-white/10 rounded-3xl p-6 grid grid-cols-1 lg:grid-cols-2 gap-6 max-h-[90vh] overflow-y-auto custom-scroll">
+            <div class="space-y-4">
+                <h3 class="text-lg font-black uppercase tracking-widest">Edit Local Metadata</h3>
+                <label class="block space-y-2">
+                    <span class="text-[10px] uppercase text-white/50">Title</span>
+                    <input id="edit-game-title" class="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs" />
+                </label>
+                <label class="block space-y-2">
+                    <span class="text-[10px] uppercase text-white/50">Description</span>
+                    <textarea id="edit-game-description" rows="5" class="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs"></textarea>
+                </label>
+                <label class="block space-y-2">
+                    <span class="text-[10px] uppercase text-white/50">Cover URL</span>
+                    <input id="edit-game-cover" class="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs" />
+                </label>
+                <label class="block space-y-2">
+                    <span class="text-[10px] uppercase text-white/50">Info JSON</span>
+                    <textarea id="edit-game-info" rows="6" class="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs font-mono"></textarea>
+                </label>
+                <div class="flex gap-3 pt-2">
+                    <button id="btn-save-game-edit" class="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-[10px] font-black uppercase tracking-widest">Save</button>
+                    <button id="btn-close-game-edit" class="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-[10px] font-black uppercase tracking-widest">Close</button>
+                </div>
+            </div>
+            <div>
+                <div class="flex items-center justify-between mb-3">
+                    <h4 class="text-sm font-black uppercase tracking-widest text-white/60">Cover Candidates</h4>
+                    <button id="btn-search-cover-candidates" class="px-3 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-[10px] font-black uppercase tracking-widest">Search Covers</button>
+                </div>
+                <div id="cover-candidates-grid" class="grid grid-cols-2 md:grid-cols-3 gap-3"></div>
+            </div>
+        </div>
+    </div>
+
     <script>
         const API = {
-            search: (q) => fetch(`/search?q=${encodeURIComponent(q)}`).then(r => r.json()),
-            getGame: (url) => fetch(`/game?url=${encodeURIComponent(url)}`).then(r => r.json()),
+            search: (q, consoleId, stores) => { const params = new URLSearchParams({ q }); if (consoleId) params.set('console', consoleId); if (stores?.length) params.set('stores', stores.join(',')); return fetch(`/search?${params.toString()}`).then(r => r.json()); },
+            getGame: (url, consoleId) => fetch(`/game?url=${encodeURIComponent(url)}${consoleId ? `&console=${encodeURIComponent(consoleId)}` : ''}`).then(r => r.json()),
+            getMarketCover: (title, console, coverSources) => { const params = new URLSearchParams({ title, console: console || '' }); if (coverSources?.length) params.set('cover_sources', coverSources.join(',')); return fetch(`/market_cover?${params.toString()}`).then(r => r.json()); },
             listLocal: (console) => fetch(`/list_console?console=${console}`).then(r => r.json()),
-            delete: (name, console) => fetch(`/delete?filename=${encodeURIComponent(name)}&console=${encodeURIComponent(console)}`).then(r => r.json()),
-            download: (url) => fetch(url),
+            listConsoles: () => fetch(`/list_consoles`).then(r => r.json()),
+            listAddons: () => fetch(`/addons`).then(r => r.json()),
+            coverCandidates: (title, consoleId, coverSources) => { const params = new URLSearchParams({ title, console: consoleId || '' }); if (coverSources?.length) params.set('cover_sources', coverSources.join(',')); return fetch(`/cover_candidates?${params.toString()}`).then(r => r.json()); },
+            updateLocalMetadata: (payload) => fetch(`/update_local_metadata`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }).then(r => r.json()),
+            delete: (name, console, game) => {
+                const params = new URLSearchParams();
+                if (name) params.set('filename', name);
+                if (game) params.set('game', game);
+                params.set('console', console);
+                return fetch(`/delete?${params.toString()}`).then(r => r.json());
+            },
+            download: (url) => fetch(url).then(r => r.json()),
+            downloadStatus: (jobId) => fetch(`/download_status?job_id=${encodeURIComponent(jobId)}`).then(r => r.json()),
             proxyImg: (url) => `/proxy_image?url=${encodeURIComponent(url)}`
         };
 
@@ -252,20 +427,209 @@
             { id: 'dendy', name: 'NES Classic', color: '#ef4444', icon: 'gamepad-2', img: 'https://i.imgur.com/OzB5tOq.png', core: 'nes' },
             { id: 'snes', name: 'Super NES', color: '#8b5cf6', icon: 'joystick', img: 'https://i.imgur.com/wK6sR8Q.png', core: 'snes' },
             { id: 'n64', name: 'Nintendo 64', color: '#4b5563', icon: 'diamond', img: 'https://i.imgur.com/VqN9F6A.png', core: 'n64' },
+            { id: 'genesis', name: 'Sega Genesis', color: '#f97316', icon: 'bolt', img: 'https://placehold.co/320x240/111/444?text=Genesis', core: 'segaMD' },
+            { id: 'megadrive', name: 'Sega Mega Drive', color: '#f97316', icon: 'bolt', img: 'https://placehold.co/320x240/111/444?text=Mega+Drive', core: 'segaMD' },
             { id: 'ps1', name: 'PlayStation', color: '#3b82f6', icon: 'disc', img: 'https://i.imgur.com/4Uj2GyX.png', core: 'psx' },
-            { id: 'gba', name: 'GameBoy Adv', color: '#6366f1', icon: 'smartphone', img: 'https://i.imgur.com/yMjF94b.png', core: 'gba' }
+            { id: 'gba', name: 'GameBoy Adv', color: '#6366f1', icon: 'smartphone', img: 'https://i.imgur.com/yMjF94b.png', core: 'gba' },
+            { id: 'psp', name: 'PlayStation Portable', color: '#64748b', icon: 'gamepad-2', img: 'https://placehold.co/320x240/111/444?text=PSP', core: 'psp' }
         ];
+
+
+
+        const EMULATORJS_CORES = {
+            nes: ['fceumm', 'nestopia'],
+            snes: ['snes9x', 'bsnes'],
+            gb: ['gambatte'],
+            gba: ['mgba'],
+            vb: ['beetle_vb'],
+            nds: ['melonds', 'desmume2015', 'desmume'],
+            a5200: ['a5200'],
+            mame2003: ['mame2003', 'mame2003_plus'],
+            arcade: ['fbneo', 'fbalpha2012_cps1', 'fbalpha2012_cps2', 'same_cdi'],
+            psx: ['pcsx_rearmed', 'mednafen_psx_hw'],
+            jaguar: ['virtualjaguar'],
+            lynx: ['handy'],
+            segaSaturn: ['yabause'],
+            segaMD: ['genesis_plus_gx', 'genesis_plus_gx_wide'],
+            segaGG: ['genesis_plus_gx', 'genesis_plus_gx_wide'],
+            segaCD: ['genesis_plus_gx', 'genesis_plus_gx_wide'],
+            n64: ['mupen64plus_next', 'parallel-n64'],
+            _3do: ['opera'],
+            atari7800: ['prosystem'],
+            atari2600: ['stella2014'],
+            sega32x: ['picodrive'],
+            segaMS: ['smsplus'],
+            c64: ['vice_x64sc'],
+            c128: ['vice_x128'],
+            pet: ['vice_xpet'],
+            plus4: ['vice_xplus4'],
+            vic20: ['vice_xvic'],
+            amiga: ['puae'],
+            coleco: ['gearcoleco'],
+            pce: ['mednafen_pce'],
+            pcfx: ['mednafen_pcfx'],
+            ngp: ['mednafen_ngp'],
+            ws: ['mednafen_wswan'],
+            dos: ['dosbox_pure'],
+            psp: ['ppsspp']
+        };
+
+        const CONSOLE_CORE_FAMILIES = {
+            dendy: 'nes',
+            snes: 'snes',
+            n64: 'n64',
+            genesis: 'segaMD',
+            megadrive: 'segaMD',
+            ps1: 'psx',
+            gba: 'gba',
+            psp: 'psp',
+            nds: 'nds',
+            gb: 'gb',
+            sega32x: 'sega32x',
+            segams: 'segaMS',
+            segagg: 'segaGG',
+            segacd: 'segaCD',
+            segasaturn: 'segaSaturn',
+            jaguar: 'jaguar',
+            lynx: 'lynx',
+            atari2600: 'atari2600',
+            atari7800: 'atari7800',
+            '3do': '_3do',
+            pce: 'pce',
+            pcfx: 'pcfx',
+            ngp: 'ngp',
+            ws: 'ws',
+            dos: 'dos'
+        };
+        const CONSOLE_ICON_INDEX = [
+            { label: 'GoldstarLG 3DO', path: 'Icons/Consoles/3DO/GoldstarLG 3DO.png' },
+            { label: 'MiscOther 3DO', path: 'Icons/Consoles/3DO/MiscOther 3DO.png' },
+            { label: 'Panasonic 3DO', path: 'Icons/Consoles/3DO/Panasonic 3DO.png' },
+            { label: 'Sanyo 3DO', path: 'Icons/Consoles/3DO/Sanyo 3DO.png' },
+            { label: 'Atari 2600', path: 'Icons/Consoles/Atari/Atari 2600.png' },
+            { label: 'Atari 5200', path: 'Icons/Consoles/Atari/Atari 5200.png' },
+            { label: 'Atari 7800', path: 'Icons/Consoles/Atari/Atari 7800.png' },
+            { label: 'Atari C-XXX', path: 'Icons/Consoles/Atari/Atari C-XXX.png' },
+            { label: 'Atari Jaguar CD', path: 'Icons/Consoles/Atari/Atari Jaguar CD.png' },
+            { label: 'Atari Jaguar', path: 'Icons/Consoles/Atari/Atari Jaguar.png' },
+            { label: 'Atari Lynx', path: 'Icons/Consoles/Atari/Atari Lynx.png' },
+            { label: 'Atari XEGS', path: 'Icons/Consoles/Atari/Atari XEGS.png' },
+            { label: 'LCD Solarpower', path: 'Icons/Consoles/Bandai/LCD Solarpower.png' },
+            { label: 'Pippin', path: 'Icons/Consoles/Bandai/Pippin.png' },
+            { label: 'Playdia', path: 'Icons/Consoles/Bandai/Playdia.png' },
+            { label: 'RX 78', path: 'Icons/Consoles/Bandai/RX 78.png' },
+            { label: 'SwanCrystal', path: 'Icons/Consoles/Bandai/SwanCrystal.png' },
+            { label: 'TV Jack', path: 'Icons/Consoles/Bandai/TV Jack.png' },
+            { label: 'WonderSwan Color', path: 'Icons/Consoles/Bandai/WonderSwan Color.png' },
+            { label: 'WonderSwan', path: 'Icons/Consoles/Bandai/WonderSwan.png' },
+            { label: 'Loopy', path: 'Icons/Consoles/Casio/Loopy.png' },
+            { label: 'PV-1000', path: 'Icons/Consoles/Casio/PV-1000.png' },
+            { label: 'Aquarius', path: 'Icons/Consoles/Mattel/Aquarius.png' },
+            { label: 'HyperScan', path: 'Icons/Consoles/Mattel/HyperScan.png' },
+            { label: 'Intellivision', path: 'Icons/Consoles/Mattel/Intellivision.png' },
+            { label: 'Mattel Electronics', path: 'Icons/Consoles/Mattel/Mattel Electronics.png' },
+            { label: 'Microsoft Xbox 360', path: 'Icons/Consoles/Microsoft/Microsoft Xbox 360.png' },
+            { label: 'Microsoft Xbox One S', path: 'Icons/Consoles/Microsoft/Microsoft Xbox One S.png' },
+            { label: 'Microsoft Xbox One X', path: 'Icons/Consoles/Microsoft/Microsoft Xbox One X.png' },
+            { label: 'Microsoft Xbox One', path: 'Icons/Consoles/Microsoft/Microsoft Xbox One.png' },
+            { label: 'Microsoft Xbox Series S', path: 'Icons/Consoles/Microsoft/Microsoft Xbox Series S.png' },
+            { label: 'Microsoft Xbox Series X', path: 'Icons/Consoles/Microsoft/Microsoft Xbox Series X.png' },
+            { label: 'Microsoft Xbox', path: 'Icons/Consoles/Microsoft/Microsoft Xbox.png' },
+            { label: 'PC-FX', path: 'Icons/Consoles/NEC/PC-FX.png' },
+            { label: 'TurboDuo', path: 'Icons/Consoles/NEC/TurboDuo.png' },
+            { label: 'TurboExpress', path: 'Icons/Consoles/NEC/TurboExpress.png' },
+            { label: 'TurboGrafx-16', path: 'Icons/Consoles/NEC/TurboGrafx-16.png' },
+            { label: 'Neo Geo AES', path: 'Icons/Consoles/Neo Geo/Neo Geo AES.png' },
+            { label: 'Neo Geo CD', path: 'Icons/Consoles/Neo Geo/Neo Geo CD.png' },
+            { label: 'Neo Geo Pocket Color', path: 'Icons/Consoles/Neo Geo/Neo Geo Pocket Color.png' },
+            { label: 'Neo Geo Pocket', path: 'Icons/Consoles/Neo Geo/Neo Geo Pocket.png' },
+            { label: 'Color TV Game', path: 'Icons/Consoles/Nintendo/Color TV Game.png' },
+            { label: 'Famicom Disk System', path: 'Icons/Consoles/Nintendo/Famicom Disk System.png' },
+            { label: 'Famicom', path: 'Icons/Consoles/Nintendo/Famicom.png' },
+            { label: 'Game & Watch Mini Classics', path: 'Icons/Consoles/Nintendo/Game & Watch Mini Classics.png' },
+            { label: 'Game & Watch', path: 'Icons/Consoles/Nintendo/Game & Watch.png' },
+            { label: 'Game Boy Advance SP', path: 'Icons/Consoles/Nintendo/Game Boy Advance SP.png' },
+            { label: 'Game Boy Advance', path: 'Icons/Consoles/Nintendo/Game Boy Advance.png' },
+            { label: 'Game Boy Color', path: 'Icons/Consoles/Nintendo/Game Boy Color.png' },
+            { label: 'Game Boy Light', path: 'Icons/Consoles/Nintendo/Game Boy Light.png' },
+            { label: 'Game Boy Micro', path: 'Icons/Consoles/Nintendo/Game Boy Micro.png' },
+            { label: 'Game Boy Pocket', path: 'Icons/Consoles/Nintendo/Game Boy Pocket.png' },
+            { label: 'Game Boy', path: 'Icons/Consoles/Nintendo/Game Boy.png' },
+            { label: 'Gamecube', path: 'Icons/Consoles/Nintendo/Gamecube.png' },
+            { label: 'NES', path: 'Icons/Consoles/Nintendo/NES.webp' },
+            { label: 'New Nintendo 2DS XL', path: 'Icons/Consoles/Nintendo/New Nintendo 2DS XL.png' },
+            { label: 'New Nintendo 3DS Xl', path: 'Icons/Consoles/Nintendo/New Nintendo 3DS Xl.png' },
+            { label: 'New Nintendo 3DS', path: 'Icons/Consoles/Nintendo/New Nintendo 3DS.png' },
+            { label: 'Nintendo 2DS', path: 'Icons/Consoles/Nintendo/Nintendo 2DS.png' },
+            { label: 'Nintendo 3DS Xl', path: 'Icons/Consoles/Nintendo/Nintendo 3DS Xl.png' },
+            { label: 'Nintendo 3DS', path: 'Icons/Consoles/Nintendo/Nintendo 3DS.png' },
+            { label: 'Nintendo 64 DD', path: 'Icons/Consoles/Nintendo/Nintendo 64 DD.png' },
+            { label: 'Nintendo 64', path: 'Icons/Consoles/Nintendo/Nintendo 64.png' },
+            { label: 'Nintendo DS Lite', path: 'Icons/Consoles/Nintendo/Nintendo DS Lite.png' },
+            { label: 'Nintendo DS', path: 'Icons/Consoles/Nintendo/Nintendo DS.png' },
+            { label: 'Nintendo DSi XL', path: 'Icons/Consoles/Nintendo/Nintendo DSi XL.png' },
+            { label: 'Nintendo DSi', path: 'Icons/Consoles/Nintendo/Nintendo DSi.png' },
+            { label: 'Nintendo Switch 2', path: 'Icons/Consoles/Nintendo/Nintendo Switch 2.webp' },
+            { label: 'Nintendo Switch Lite', path: 'Icons/Consoles/Nintendo/Nintendo Switch Lite.png' },
+            { label: 'Nintendo Switch OLED Model', path: 'Icons/Consoles/Nintendo/Nintendo Switch OLED Model.png' },
+            { label: 'Nintendo Switch', path: 'Icons/Consoles/Nintendo/Nintendo Switch.png' },
+            { label: 'Nintendo Wii U', path: 'Icons/Consoles/Nintendo/Nintendo Wii U.png' },
+            { label: 'Nintendo Wii', path: 'Icons/Consoles/Nintendo/Nintendo Wii.png' },
+            { label: 'Pokemon Mini', path: 'Icons/Consoles/Nintendo/Pokemon Mini.png' },
+            { label: 'SNES', path: 'Icons/Consoles/Nintendo/SNES.png' },
+            { label: 'Virtual Boy', path: 'Icons/Consoles/Nintendo/Virtual Boy.webp' },
+            { label: 'CD-i', path: 'Icons/Consoles/Philips Magnavox/CD-i.png' },
+            { label: 'Magnavox Odyssey 2', path: 'Icons/Consoles/Philips Magnavox/Magnavox Odyssey 2.png' },
+            { label: 'Magnavox Odyssey', path: 'Icons/Consoles/Philips Magnavox/Magnavox Odyssey.png' },
+            { label: 'Philips Odyssey', path: 'Icons/Consoles/Philips Magnavox/Philips Odyssey.png' },
+            { label: 'Retro-Emulator-Game-Manger-0aaa86b99c10021463039c348ecbfffc1c41144c', path: 'Icons/Consoles/Retro-Emulator-Game-Manger-0aaa86b99c10021463039c348ecbfffc1c41144c/Retro-Emulator-Game-Manger-0aaa86b99c10021463039c348ecbfffc1c41144c' },
+            { label: 'Retro-Emulator-Game-Manger-ac923861fc63c3c096c8133c5e9370443cdceb1a', path: 'Icons/Consoles/Retro-Emulator-Game-Manger-ac923861fc63c3c096c8133c5e9370443cdceb1a/Retro-Emulator-Game-Manger-ac923861fc63c3c096c8133c5e9370443cdceb1a' },
+            { label: 'Sega 32X', path: 'Icons/Consoles/Sega/Sega 32X.png' },
+            { label: 'Sega Dreamcast', path: 'Icons/Consoles/Sega/Sega Dreamcast.png' },
+            { label: 'Sega Game Gear', path: 'Icons/Consoles/Sega/Sega Game Gear.png' },
+            { label: 'Sega Genesis Mega Drive', path: 'Icons/Consoles/Sega/Sega Genesis Mega Drive.png' },
+            { label: 'Sega Master System', path: 'Icons/Consoles/Sega/Sega Master System.png' },
+            { label: 'Sega Mega CD', path: 'Icons/Consoles/Sega/Sega Mega CD.png' },
+            { label: 'Sega Pico', path: 'Icons/Consoles/Sega/Sega Pico.png' },
+            { label: 'Sega SG X000', path: 'Icons/Consoles/Sega/Sega SG X000.png' },
+            { label: 'Sega Saturn', path: 'Icons/Consoles/Sega/Sega Saturn.png' },
+            { label: 'PlayStation 5 Pro', path: 'Icons/Consoles/Sony/PlayStation 5 Pro.png' },
+            { label: 'PlayStation 5 Slim', path: 'Icons/Consoles/Sony/PlayStation 5 Slim.png' },
+            { label: 'Sony PSP Go', path: 'Icons/Consoles/Sony/Sony PSP Go.png' },
+            { label: 'Sony PSP X000 Series', path: 'Icons/Consoles/Sony/Sony PSP X000 Series.png' },
+            { label: 'Sony PSX', path: 'Icons/Consoles/Sony/Sony PSX.png' },
+            { label: 'Sony PlayStation  TV', path: 'Icons/Consoles/Sony/Sony PlayStation  TV.png' },
+            { label: 'Sony PlayStation 2 Slim', path: 'Icons/Consoles/Sony/Sony PlayStation 2 Slim.png' },
+            { label: 'Sony PlayStation 2', path: 'Icons/Consoles/Sony/Sony PlayStation 2.png' },
+            { label: 'Sony PlayStation 3 Slim', path: 'Icons/Consoles/Sony/Sony PlayStation 3 Slim.png' },
+            { label: 'Sony PlayStation 3 Super Slim', path: 'Icons/Consoles/Sony/Sony PlayStation 3 Super Slim.png' },
+            { label: 'Sony PlayStation 3', path: 'Icons/Consoles/Sony/Sony PlayStation 3.png' },
+            { label: 'Sony PlayStation 4 Pro', path: 'Icons/Consoles/Sony/Sony PlayStation 4 Pro.png' },
+            { label: 'Sony PlayStation 4 Slim', path: 'Icons/Consoles/Sony/Sony PlayStation 4 Slim.png' },
+            { label: 'Sony PlayStation 4', path: 'Icons/Consoles/Sony/Sony PlayStation 4.png' },
+            { label: 'Sony PlayStation 5', path: 'Icons/Consoles/Sony/Sony PlayStation 5.png' },
+            { label: 'Sony PlayStation Vita', path: 'Icons/Consoles/Sony/Sony PlayStation Vita.png' },
+            { label: 'Sony PlayStation', path: 'Icons/Consoles/Sony/Sony PlayStation.png' }
+        ];
+
+        const MARKET_SOURCE_KEYS = ['vimm', 'emuland'];
+        const COVER_SOURCE_KEYS = ['libreto', 'vimm', 'emuland', 'thegamesdb'];
 
         let state = {
             view: 'HOME',
             selectedConsole: null,
             lastGameUrl: "",
-            isEmulating: false
+            lastGameConsole: '',
+            isEmulating: false,
+            localGames: [],
+            selectedLocalGame: null,
+            consoles: [],
+            searchConsoleFilter: ''
         };
 
         function navTo(view) {
             state.view = view;
-            ['home', 'store', 'library', 'market-detail'].forEach(v => {
+            ['home', 'store', 'library', 'market-detail', 'settings'].forEach(v => {
                 const el = document.getElementById(`view-${v}`);
                 if (el) el.classList.add('hidden');
             });
@@ -274,11 +638,16 @@
 
             document.getElementById('btn-home').classList.remove('active-link');
             document.getElementById('btn-store').classList.remove('active-link');
+            document.getElementById('btn-settings').classList.remove('active-link');
             if (view === 'HOME') document.getElementById('btn-home').classList.add('active-link');
             if (view === 'STORE') document.getElementById('btn-store').classList.add('active-link');
+            if (view === 'SETTINGS') document.getElementById('btn-settings').classList.add('active-link');
 
             updateBreadcrumbs();
             updateGlow(view === 'STORE' || view === 'MARKET-DETAIL' ? '#8b5cf6' : '#3b82f6');
+            if (view === 'SETTINGS') {
+                renderSettings();
+            }
         }
 
         function updateBreadcrumbs() {
@@ -286,20 +655,85 @@
             let html = `<span class="text-white/40 cursor-pointer hover:text-white" onclick="navTo('HOME')">Dashboard</span>`;
             if (state.view === 'STORE') html += ` <i data-lucide="chevron-right" size="10" class="text-white/20"></i> <span class="text-white">Market</span>`;
             else if (state.view === 'MARKET-DETAIL') html += ` <i data-lucide="chevron-right" size="10" class="text-white/20"></i> <span class="text-white/40 cursor-pointer" onclick="navTo('STORE')">Market</span> <i data-lucide="chevron-right" size="10" class="text-white/20"></i> <span class="text-white">Detail</span>`;
+            else if (state.view === 'SETTINGS') html += ` <i data-lucide="chevron-right" size="10" class="text-white/20"></i> <span class="text-white">Settings</span>`;
             else if (state.selectedConsole) html += ` <i data-lucide="chevron-right" size="10" class="text-white/20"></i> <span class="text-white">${state.selectedConsole.name}</span>`;
             container.innerHTML = html;
             lucide.createIcons();
+            prepareMedia(container);
         }
 
         function updateGlow(color) {
             document.getElementById('glow-layer').style.background = `radial-gradient(circle at top right, ${color}15, transparent 60%)`;
         }
 
+        function prepareMedia(container) {
+            if (!container) return;
+            container.querySelectorAll('img').forEach(img => {
+                img.classList.add('media-loading');
+                const finalize = () => img.classList.add('media-loaded');
+                if (img.complete) {
+                    finalize();
+                } else {
+                    img.addEventListener('load', finalize, { once: true });
+                    img.addEventListener('error', finalize, { once: true });
+                }
+            });
+        }
+
+        function normalizeConsoleName(value) {
+            return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+        }
+
+        function scoreConsoleMatch(a, b) {
+            if (!a || !b) return 0;
+            if (a === b) return 1;
+            const aTokens = new Set(a.split(' ').filter(Boolean));
+            const bTokens = new Set(b.split(' ').filter(Boolean));
+            let common = 0;
+            aTokens.forEach(token => {
+                if (bTokens.has(token)) common += 1;
+            });
+            return common / Math.max(aTokens.size, bTokens.size);
+        }
+
+        function getConsoleIcon(name) {
+            const target = normalizeConsoleName(name || '');
+            let bestPath = null;
+            let bestScore = 0;
+            CONSOLE_ICON_INDEX.forEach(entry => {
+                const score = scoreConsoleMatch(target, normalizeConsoleName(entry.label));
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestPath = entry.path;
+                }
+            });
+            return bestScore >= 0.4 ? bestPath : null;
+        }
+
+        function getCoreOptionsForConsole(consoleId) {
+            const family = CONSOLE_CORE_FAMILIES[consoleId];
+            if (!family) return [];
+            return EMULATORJS_CORES[family] || [];
+        }
+
+        function inferEmulatorJsCore(consoleId, fallbackCore) {
+            if (fallbackCore) return fallbackCore;
+            const family = CONSOLE_CORE_FAMILIES[consoleId];
+            const options = family ? (EMULATORJS_CORES[family] || []) : [];
+            if (family === '_3do') return '3do';
+            if (family) return family;
+            if (options.length) return options[0];
+            return null;
+        }
+
         function renderConsoles() {
             const grid = document.getElementById('console-grid');
-            grid.innerHTML = CONSOLES.map(c => `
+            const entries = state.consoles.length ? state.consoles : CONSOLES;
+            grid.innerHTML = entries.map(c => {
+                const iconPath = getConsoleIcon(c.name) || c.img;
+                return `
                 <div class="console-card group glass rounded-3xl p-5 cursor-pointer relative overflow-hidden h-56 flex flex-col justify-end border border-white/5" onclick="selectConsole('${c.id}')">
-                    <img src="${c.img}" class="absolute inset-0 w-full h-full object-contain opacity-10 group-hover:opacity-20 transition-all -z-10 group-hover:scale-105 duration-500 p-8">
+                    <img src="${iconPath}" class="absolute inset-0 w-full h-full object-contain opacity-10 group-hover:opacity-20 transition-all -z-10 group-hover:scale-105 duration-500 p-8">
                     <div class="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent"></div>
                     <div class="relative z-10">
                         <div class="w-10 h-10 rounded-xl flex items-center justify-center mb-3" style="background-color: ${c.color}">
@@ -309,15 +743,188 @@
                         <p class="text-[9px] text-white/30 uppercase tracking-[0.2em] font-black italic">Library Access</p>
                     </div>
                 </div>
-            `).join('');
+            `}).join('');
             lucide.createIcons();
         }
 
+        async function loadConsoleList() {
+            try {
+                const response = await API.listConsoles();
+                const localConsoles = response.consoles || [];
+                const mapped = [...CONSOLES];
+                localConsoles.forEach(id => {
+                    if (mapped.some(c => c.id === id)) return;
+                    mapped.push({
+                        id,
+                        name: id.toUpperCase(),
+                        color: '#475569',
+                        icon: 'hard-drive',
+                        img: 'https://placehold.co/240x200/111/444?text=ROM',
+                        core: inferEmulatorJsCore(id, null)
+                    });
+                });
+                state.consoles = mapped;
+            } catch (e) {
+                state.consoles = CONSOLES;
+            }
+            renderConsoles();
+            populateSearchFilter();
+        }
+
+        function closeAllCustomDropdowns() {
+            document.querySelectorAll('.custom-dropdown.open').forEach(el => el.classList.remove('open'));
+        }
+
+        function buildCustomDropdown({ options, value, onChange, disabled = false }) {
+            const root = document.createElement('div');
+            root.className = `custom-dropdown${disabled ? ' disabled' : ''}`;
+
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'custom-dropdown-btn';
+
+            const menu = document.createElement('div');
+            menu.className = 'custom-dropdown-menu';
+
+            let currentValue = value;
+            const optionMap = new Map(options.map(o => [o.value, o.label]));
+
+            function setActive(v) {
+                currentValue = v;
+                btn.textContent = optionMap.get(v) || options[0]?.label || '';
+                menu.querySelectorAll('.custom-dropdown-option').forEach(opt => {
+                    opt.classList.toggle('active', opt.dataset.value === v);
+                });
+            }
+
+            options.forEach(opt => {
+                const optionBtn = document.createElement('button');
+                optionBtn.type = 'button';
+                optionBtn.className = 'custom-dropdown-option';
+                optionBtn.dataset.value = opt.value;
+                optionBtn.textContent = opt.label;
+                optionBtn.addEventListener('click', () => {
+                    setActive(opt.value);
+                    root.classList.remove('open');
+                    if (onChange) onChange(opt.value);
+                });
+                menu.appendChild(optionBtn);
+            });
+
+            setActive(currentValue);
+
+            if (!disabled) {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const wasOpen = root.classList.contains('open');
+                    closeAllCustomDropdowns();
+                    if (!wasOpen) root.classList.add('open');
+                });
+            }
+
+            root.appendChild(btn);
+            root.appendChild(menu);
+            return root;
+        }
+
+        function populateSearchFilter() {
+            const container = document.getElementById('search-console-filter-container');
+            if (!container) return;
+            const options = [{ value: '', label: 'All Systems' }, ...state.consoles.map(c => ({ value: c.id, label: c.name }))];
+            if (!options.some(o => o.value === state.searchConsoleFilter)) state.searchConsoleFilter = '';
+            container.innerHTML = '';
+            container.appendChild(buildCustomDropdown({
+                options,
+                value: state.searchConsoleFilter,
+                onChange: (nextValue) => {
+                    state.searchConsoleFilter = nextValue;
+                    if (document.getElementById('search-input').value.trim()) doSearch();
+                }
+            }));
+        }
+
+        async function rescanLibraryMetadata() {
+            const button = document.getElementById('btn-rescan-metadata');
+            if (!button) return;
+            const original = button.textContent;
+            button.disabled = true;
+            button.textContent = 'Rescanning...';
+            try {
+                const targetConsole = state.selectedConsole?.id || '';
+                const params = new URLSearchParams();
+                if (targetConsole) params.set('console', targetConsole);
+                const settings = getSettings();
+                const coverSources = COVER_SOURCE_KEYS.filter(key => !!settings.localCoverSources?.[key]);
+                if (coverSources.length) params.set('cover_sources', coverSources.join(','));
+                const data = await fetch(`/refresh_local_files?${params.toString()}`).then(r => r.json());
+                alert(`Metadata rescan complete. Updated: ${data.updated || 0}, Skipped: ${data.skipped || 0}`);
+                if (state.selectedConsole) await loadLocalGames(state.selectedConsole.id);
+            } catch (e) {
+                alert('Metadata rescan failed. Please try again.');
+            } finally {
+                button.disabled = false;
+                button.textContent = original;
+            }
+        }
+
+        function getSettings() {
+            const defaults = {
+                stores: {
+                    libreto: true,
+                    vimm: true,
+                    emuland: false,
+                    thegamesdb: true
+                },
+                coverSources: {
+                    libreto: true,
+                    vimm: true,
+                    emuland: true,
+                    thegamesdb: true
+                },
+                localCoverSources: {
+                    libreto: true,
+                    vimm: true,
+                    thegamesdb: true,
+                    emuland: true
+                },
+                emulators: {},
+                emulatorJsCores: {}
+            };
+            try {
+                const stored = JSON.parse(localStorage.getItem('settings') || '{}');
+                const mergedStores = { ...defaults.stores, ...(stored.stores || {}) };
+                const mergedCoverSources = { ...defaults.coverSources, ...(stored.coverSources || {}) };
+                const mergedLocalCoverSources = { ...defaults.localCoverSources, ...(stored.localCoverSources || {}) };
+                return {
+                    stores: Object.fromEntries(MARKET_SOURCE_KEYS.map(k => [k, !!mergedStores[k]])),
+                    coverSources: Object.fromEntries(COVER_SOURCE_KEYS.map(k => [k, !!mergedCoverSources[k]])),
+                    localCoverSources: Object.fromEntries(COVER_SOURCE_KEYS.map(k => [k, !!mergedLocalCoverSources[k]])),
+                    emulators: { ...defaults.emulators, ...(stored.emulators || {}) },
+                    emulatorJsCores: { ...defaults.emulatorJsCores, ...(stored.emulatorJsCores || {}) }
+                };
+            } catch (e) {
+                return defaults;
+            }
+        }
+
+        function saveSettings(settings) {
+            localStorage.setItem('settings', JSON.stringify(settings));
+        }
+
         function selectConsole(id) {
-            state.selectedConsole = CONSOLES.find(c => c.id === id);
+            state.selectedConsole = state.consoles.find(c => c.id === id);
+            state.selectedLocalGame = null;
+            document.getElementById('library-detail-container').innerHTML = `
+                <div class="h-full flex flex-col items-center justify-center text-white/10 text-center space-y-4 py-20">
+                    <i data-lucide="gamepad-2" size="48" class="opacity-10"></i>
+                    <p class="text-[10px] font-black uppercase tracking-widest italic">Select local module</p>
+                </div>
+            `;
             navTo('LIBRARY');
             loadLocalGames(id);
         }
+
+        let storeRenderToken = 0;
 
         async function doSearch() {
             const q = document.getElementById('search-input').value;
@@ -326,12 +933,27 @@
             navTo('STORE');
             const sectionsContainer = document.getElementById('store-sections');
             const status = document.getElementById('search-status');
+            const renderToken = ++storeRenderToken;
             
             sectionsContainer.innerHTML = `<div class="py-20 text-center font-black text-white/10 italic animate-pulse uppercase tracking-[0.3em]">Querying Network Archive...</div>`;
-            status.textContent = `SEARCHING: "${q.toUpperCase()}"`;
+            status.textContent = `SEARCHING: "${q.toUpperCase()}" ${state.searchConsoleFilter ? `(FILTER: ${state.searchConsoleFilter.toUpperCase()})` : ''}`;
 
             try {
-                const data = await API.search(q);
+                const settings = getSettings();
+                const activeStores = MARKET_SOURCE_KEYS.filter(key => !!settings.stores?.[key]);
+                if (!activeStores.length) {
+                    status.textContent = 'NO MARKET SOURCE ENABLED';
+                    sectionsContainer.innerHTML = `<div class="py-20 text-center font-black text-yellow-400/70 italic uppercase tracking-[0.2em]">Enable at least one Marketplace Source in Settings.</div>`;
+                    return;
+                }
+
+                const consoleFilter = state.searchConsoleFilter || '';
+                const data = await API.search(q, consoleFilter || null, activeStores);
+                if (renderToken !== storeRenderToken) return;
+                if (data.status === 'error') {
+                    sectionsContainer.innerHTML = `<div class="py-20 text-center font-black text-yellow-400/70 italic uppercase tracking-[0.2em]">${data.message || 'Search source unavailable.'}</div>`;
+                    return;
+                }
                 if (!data.games || data.games.length === 0) {
                     sectionsContainer.innerHTML = `<div class="py-20 text-center font-black text-white/10 italic uppercase tracking-[0.2em]">Zero results found in global cache.</div>`;
                     return;
@@ -344,41 +966,65 @@
                     grouped[key].push(g);
                 });
 
-                sectionsContainer.innerHTML = Object.entries(grouped).map(([consoleName, games]) => `
-                    <div class="animate-fade">
-                        <h3 class="text-[10px] font-black italic text-blue-500 uppercase tracking-[0.4em] mb-4 border-b border-blue-500/10 pb-2">${consoleName} <span class="text-white/20 ml-2">(${games.length})</span></h3>
-                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
-                            ${games.map(game => `
-                                <div class="game-card glass rounded-2xl p-4 flex flex-col h-72 relative overflow-hidden group border border-white/5 cursor-pointer" onclick="showMarketGameDetails('${game.link}')">
-                                    <div class="w-full h-36 bg-black/40 rounded-xl mb-3 overflow-hidden relative">
-                                        <img src="${game.thumbnail ? API.proxyImg(game.thumbnail) : 'https://placehold.co/400x300/111/555?text=No+Boxart'}" 
-                                             class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500">
+                const consoleEntries = Object.entries(grouped);
+                sectionsContainer.innerHTML = consoleEntries.map(([consoleName, games], index) => {
+                    const consoleIcon = getConsoleIcon(consoleName);
+                    const header = consoleIcon
+                        ? `<div class="flex items-center gap-2"><img src="${consoleIcon}" class="w-5 h-5 object-contain opacity-80"> <span>${consoleName}</span></div>`
+                        : consoleName;
+                    return `
+                        <div class="animate-fade">
+                            <h3 class="text-[10px] font-black italic text-blue-500 uppercase tracking-[0.4em] mb-4 border-b border-blue-500/10 pb-2">${header} <span class="text-white/20 ml-2">(${games.length})</span></h3>
+                            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4" id="console-grid-${index}">
+                                ${games.map(game => `
+                                    <div class="game-card glass rounded-2xl p-4 flex flex-col h-72 relative overflow-hidden group border border-white/5 cursor-pointer" onclick="showMarketGameDetails('${game.link}', '${game.console_id || ''}')">
+                                        <div class="w-full h-36 bg-black/40 rounded-xl mb-3 overflow-hidden relative">
+                                            <img src="${game.thumbnail ? API.proxyImg(game.thumbnail) : 'https://placehold.co/400x300/111/555?text=No+Boxart'}" loading="lazy"
+                                                 class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500">
+                                        </div>
+                                        <h4 class="text-xs font-bold truncate mb-1 uppercase tracking-tight">${game.title}</h4>
+                                        <p class="text-[9px] text-white/20 uppercase font-black tracking-widest mt-auto italic">${game.players || '1-Player'}</p>
+                                        <div class="mt-2">
+                                            <button class="w-full py-2 bg-white/5 group-hover:bg-blue-600 text-[9px] font-black uppercase tracking-widest transition-all rounded-lg group-hover:text-white text-white/40">Details</button>
+                                        </div>
                                     </div>
-                                    <h4 class="text-xs font-bold truncate mb-1 uppercase tracking-tight">${game.title}</h4>
-                                    <p class="text-[9px] text-white/20 uppercase font-black tracking-widest mt-auto italic">${game.players || '1-Player'}</p>
-                                    <div class="mt-2">
-                                        <button class="w-full py-2 bg-white/5 group-hover:bg-blue-600 text-[9px] font-black uppercase tracking-widest transition-all rounded-lg group-hover:text-white text-white/40">Details</button>
-                                    </div>
-                                </div>
-                            `).join('')}
+                                `).join('')}
+                            </div>
                         </div>
-                    </div>
-                `).join('');
+                    `;
+                }).join('');
                 lucide.createIcons();
+                consoleEntries.forEach((_, index) => {
+                    const grid = document.getElementById(`console-grid-${index}`);
+                    if (grid) prepareMedia(grid);
+                });
             } catch (e) {
                 sectionsContainer.innerHTML = `<div class="py-20 text-center text-red-500/40 italic font-black uppercase tracking-widest text-xs">Search interface disconnected.</div>`;
             }
         }
 
-        async function showMarketGameDetails(url) {
+        async function showMarketGameDetails(url, consoleHint = '') {
             state.lastGameUrl = url;
+            state.lastGameConsole = consoleHint || state.searchConsoleFilter || state.lastGameConsole || '';
             navTo('MARKET-DETAIL');
             const container = document.getElementById('market-detail-container');
             container.innerHTML = `<div class="h-64 flex items-center justify-center font-black italic text-white/10 animate-pulse text-sm uppercase tracking-[0.3em]">Synchronizing Asset Data...</div>`;
             
             try {
-                const data = await API.getGame(url);
+                const data = await API.getGame(url, state.lastGameConsole || undefined);
                 const game = data.game;
+                let marketCover = game.thumbnail || (game.screenshots?.[0] || null);
+                try {
+                    const coverSources = COVER_SOURCE_KEYS.filter(key => !!getSettings().coverSources?.[key]);
+                    if (coverSources.length) {
+                        const coverResponse = await API.getMarketCover(game.title, game.console, coverSources);
+                        if (coverResponse?.cover) {
+                            marketCover = coverResponse.cover;
+                        } else if (coverResponse?.screenshots?.length) {
+                            marketCover = coverResponse.screenshots[0];
+                        }
+                    }
+                } catch (e) {}
                 
                 const infoHtml = Object.entries(game.info).map(([k, v]) => `
                     <div class="flex justify-between items-center text-[10px] py-1.5 border-b border-white/5">
@@ -390,7 +1036,7 @@
                     <div class="flex gap-10 items-start">
                         <div class="w-64 space-y-4 flex-shrink-0">
                             <div class="w-full h-80 bg-black/60 rounded-3xl border border-white/10 overflow-hidden shadow-2xl">
-                                <img src="${game.thumbnail ? API.proxyImg(game.thumbnail) : 'https://placehold.co/400x600/111/555?text=N/A'}" class="w-full h-full object-cover">
+                                <img src="${marketCover ? API.proxyImg(marketCover) : 'https://placehold.co/400x600/111/555?text=N/A'}" class="w-full h-full object-cover">
                             </div>
                             <div class="p-5 glass rounded-2xl border border-white/5">
                                 <h5 class="text-[9px] font-black text-white/20 uppercase tracking-[0.2em] mb-3 italic">Hardware Specs</h5>
@@ -427,7 +1073,7 @@
                                         ${rom.local ? `
                                             <button class="px-5 py-2 bg-white/5 text-white/10 rounded-xl text-[9px] font-black uppercase tracking-widest cursor-not-allowed">LINKED</button>
                                         ` : `
-                                            <button onclick="handleDownloadROM('${rom.download_url}')" class="px-6 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-[9px] font-black uppercase tracking-widest transition-all">PULL ROM</button>
+                                            <button onclick="handleDownloadROM(this, '${rom.download_url}')" class="px-6 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-[9px] font-black uppercase tracking-widest transition-all">PULL ROM</button>
                                         `}
                                     </div>
                                 `).join('')}
@@ -436,6 +1082,7 @@
                     </div>
                 `;
                 lucide.createIcons();
+                prepareMedia(container);
             } catch (e) {
                 container.innerHTML = `<div class="py-20 text-center text-red-500 italic font-black text-sm uppercase">Interface Synchro Error.</div>`;
             }
@@ -445,29 +1092,37 @@
             const list = document.getElementById('local-list');
             const countLabel = document.getElementById('local-count');
             const libTitle = document.getElementById('library-title');
+            state.selectedLocalGame = null;
+            document.getElementById('library-detail-container').innerHTML = `
+                <div class="h-full flex flex-col items-center justify-center text-white/10 text-center space-y-4 py-20">
+                    <i data-lucide="gamepad-2" size="48" class="opacity-10"></i>
+                    <p class="text-[10px] font-black uppercase tracking-widest italic">Select local module</p>
+                </div>
+            `;
             
-            const con = CONSOLES.find(c => c.id === consoleId);
+            const con = state.consoles.find(c => c.id === consoleId) || CONSOLES.find(c => c.id === consoleId);
             libTitle.textContent = con ? con.name : 'Vault';
             list.innerHTML = `<div class="p-6 text-center text-[10px] font-black text-white/10 animate-pulse italic uppercase tracking-widest">Scanning...</div>`;
             
             try {
                 const data = await API.listLocal(consoleId);
-                const roms = data.roms || [];
-                countLabel.textContent = roms.length;
-                
-                if (roms.length === 0) {
+                const games = data.games || [];
+                state.localGames = games;
+                countLabel.textContent = games.length;
+
+                if (games.length === 0) {
                     list.innerHTML = `<div class="p-8 text-center glass rounded-2xl border border-dashed border-white/5 text-[9px] font-black uppercase text-white/10 italic">Empty Archive</div>`;
                     return;
                 }
 
-                list.innerHTML = roms.map(name => `
+                list.innerHTML = games.map((game, index) => `
                     <div class="p-3 rounded-xl flex items-center justify-between group transition-all cursor-pointer hover:bg-white/5 border border-transparent" 
-                         onclick="selectLocalGame('${name}', '${consoleId}')">
+                         onclick="selectLocalGame(${index}, '${consoleId}')">
                         <div class="flex items-center gap-2 overflow-hidden">
                             <i data-lucide="file-code" size="12" class="text-blue-500/40"></i>
-                            <p class="text-[11px] font-bold truncate text-white/50 group-hover:text-white transition-colors uppercase italic">${name}</p>
+                            <p class="text-[11px] font-bold truncate text-white/50 group-hover:text-white transition-colors uppercase italic">${game.title || game.folder}</p>
                         </div>
-                        <button onclick="event.stopPropagation(); handleDeleteROM('${name}', '${consoleId}')" class="opacity-0 group-hover:opacity-100 p-1.5 hover:text-red-500 transition-all">
+                        <button onclick="event.stopPropagation(); handleDeleteROM('${game.folder}', '${consoleId}', true)" class="opacity-0 group-hover:opacity-100 p-1.5 hover:text-red-500 transition-all">
                             <i data-lucide="x" size="12"></i>
                         </button>
                     </div>
@@ -478,28 +1133,42 @@
             }
         }
 
-        function selectLocalGame(name, consoleId) {
+        function selectLocalGame(index, consoleId) {
+            const game = state.localGames?.[index];
+            if (!game) return;
             const container = document.getElementById('library-detail-container');
-            document.querySelectorAll('#local-list > div').forEach(el => el.classList.toggle('bg-blue-600/10', el.querySelector('p')?.textContent === name));
+            const title = game.title || game.folder;
+            state.selectedLocalGame = game;
+            document.querySelectorAll('#local-list > div').forEach(el => el.classList.toggle('bg-blue-600/10', el.querySelector('p')?.textContent === title));
+            const screenshots = (game.screenshots || []).map(ss => `<img src="${ss}" class="h-24 rounded-xl border border-white/10">`).join('');
+            const coverImage = game.cover_front || game.clearlogo;
+            const infoHtml = Object.entries(game.info || {}).map(([k, v]) => `
+                <div class="flex justify-between items-center text-[10px] py-1.5 border-b border-white/5">
+                    <span class="text-white/30 uppercase font-black tracking-widest">${k}</span>
+                    <span class="font-bold text-white/60">${v}</span>
+                </div>`).join('');
+            const description = game.description || game.overview || "";
 
             container.innerHTML = `
                 <div class="animate-fade">
                     <div class="flex items-start gap-10">
-                        <div class="w-48 h-64 bg-black/40 rounded-3xl flex items-center justify-center border border-white/10 flex-shrink-0">
-                            <i data-lucide="cpu" size="48" class="text-white/10"></i>
+                        <div class="w-48 h-64 bg-black/40 rounded-3xl flex items-center justify-center border border-white/10 flex-shrink-0 overflow-hidden">
+                            ${coverImage ? `<img src="${coverImage}" class="w-full h-full object-cover">` : `<i data-lucide="cpu" size="48" class="text-white/10"></i>`}
                         </div>
                         <div class="flex-1">
                             <span class="bg-blue-600/10 text-blue-400 border border-blue-500/20 px-3 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest inline-block mb-3">Local Module</span>
-                            <h1 class="text-4xl font-black tracking-tighter uppercase italic mb-6 border-b border-white/5 pb-4">${name}</h1>
+                            <h1 class="text-4xl font-black tracking-tighter uppercase italic mb-4 border-b border-white/5 pb-4">${title}</h1>
+                            ${description ? `<p class="text-[11px] text-white/50 mb-6 leading-relaxed">${description}</p>` : ''}
                             
                             <div class="grid grid-cols-2 gap-4">
                                 <div class="p-5 glass rounded-2xl border border-white/5">
                                     <h4 class="text-[10px] font-black uppercase italic mb-3 text-white/40">Engine Control</h4>
                                     <div class="flex gap-2">
-                                        <button onclick="runGame('${name}', '${consoleId}')" class="flex-1 py-3 bg-blue-600 hover:bg-blue-500 rounded-xl font-black text-[10px] uppercase tracking-widest shadow-lg shadow-blue-600/20 transition-all flex items-center justify-center gap-2">
+                                        <button onclick="runGame('${consoleId}')" class="flex-1 py-3 bg-blue-600 hover:bg-blue-500 rounded-xl font-black text-[10px] uppercase tracking-widest shadow-lg shadow-blue-600/20 transition-all flex items-center justify-center gap-2">
                                             <i data-lucide="play" size="14"></i> Run core
                                         </button>
-                                        <button onclick="handleDeleteROM('${name}', '${consoleId}')" class="w-12 h-12 glass hover:bg-red-500/10 hover:text-red-500 rounded-xl flex items-center justify-center transition-all">
+                                        <button onclick="openEditLocalGame('${consoleId}')" class="w-12 h-12 glass hover:bg-emerald-500/10 hover:text-emerald-400 rounded-xl flex items-center justify-center transition-all"><i data-lucide='pencil' size='16'></i></button>
+                                        <button onclick="handleDeleteROM('${game.folder}', '${consoleId}', true)" class="w-12 h-12 glass hover:bg-red-500/10 hover:text-red-500 rounded-xl flex items-center justify-center transition-all">
                                             <i data-lucide="trash-2" size="16"></i>
                                         </button>
                                     </div>
@@ -510,6 +1179,8 @@
                                     <div class="flex justify-between text-[10px] uppercase font-black"><span class="text-white/20 tracking-widest">Protocol</span> <span class="text-white/60">Local</span></div>
                                 </div>
                             </div>
+                            ${infoHtml ? `<div class="space-y-1 mt-6">${infoHtml}</div>` : ''}
+                            ${screenshots ? `<div class="flex gap-2 overflow-x-auto custom-scroll mt-6">${screenshots}</div>` : ''}
                         </div>
                     </div>
                 </div>
@@ -518,34 +1189,76 @@
         }
 
         // Emulator Logic
-        function runGame(name, consoleId) {
-            const con = CONSOLES.find(c => c.id === consoleId);
-            if (!con) return;
+        function runGame(consoleId) {
+            const con = state.consoles.find(c => c.id === consoleId);
+            if (!con || !state.selectedLocalGame || !state.selectedLocalGame.rom) return;
 
             const modal = document.getElementById('emulator-modal');
             const target = document.getElementById('emulator-target');
             const title = document.getElementById('emulating-title');
-            
-            title.textContent = `RUNNING: ${name.toUpperCase()} (${con.name})`;
+            const romName = state.selectedLocalGame.rom || state.selectedLocalGame.title || "ROM";
+            const settings = getSettings();
+            const provider = settings.emulators?.[consoleId] || 'emulatorjs';
+
+            title.textContent = `RUNNING: ${romName.toUpperCase()} (${con.name})`;
             modal.style.display = 'flex';
             target.innerHTML = `<div id="game-player" class="emulator-container"></div>`;
 
-            // EmulatorJS Configuration
-            window.EJS_player = '#game-player';
-            window.EJS_core = con.core;
-            window.EJS_gameUrl = `/roms/${consoleId}/${encodeURIComponent(name)}`;
-            window.EJS_pathtodata = 'https://cdn.emulatorjs.org/stable/data/';
-            window.EJS_startOnLoaded = true; // Automatically start loading without extra "Start Game" button
-            window.EJS_AdUrl = ''; // Ensure no ad behavior
-            
-            // Clean up any existing scripts to avoid duplicates
-            const existingScript = document.getElementById('ejs-loader');
-            if (existingScript) existingScript.remove();
+            if (provider === 'neptunjs') {
+                const nepEmuMap = {
+                    dendy: 'nes',
+                    snes: 'snes',
+                    n64: 'n64',
+                    genesis: 'sega',
+                    megadrive: 'sega',
+                    ps1: 'psx',
+                    gba: 'gba'
+                };
+                const nepEmu = nepEmuMap[consoleId];
+                if (!nepEmu) return;
+                target.innerHTML = `<div id="emu" class="emulator-container"></div>`;
+                window.NepPlayer = "#emu";
+                window.NepEmu = nepEmu;
+                window.NepZoom = "enable";
+                window.NepMaxWidth = "1100px";
+                window.NepLang = "en";
+                window.EmuN64air = nepEmu === 'n64';
+                window.gameUrl = `${window.location.origin}/roms/${consoleId}/${encodeURIComponent(state.selectedLocalGame.folder)}/${encodeURIComponent(state.selectedLocalGame.rom)}`;
 
-            const script = document.createElement('script');
-            script.id = 'ejs-loader';
-            script.src = 'https://cdn.emulatorjs.org/stable/data/loader.js';
-            document.body.appendChild(script);
+                const existingScript = document.getElementById('neptunjs-loader');
+                if (existingScript) existingScript.remove();
+                const script = document.createElement('script');
+                script.id = 'neptunjs-loader';
+                script.src = 'https://mem.neptunjs.com/njs/njsLoader.js';
+                script.type = 'text/javascript';
+                document.body.appendChild(script);
+            } else {
+                // EmulatorJS Configuration
+                const selectedCore = settings.emulatorJsCores?.[consoleId];
+                window.EJS_player = '#game-player';
+                const resolvedCore = inferEmulatorJsCore(consoleId, con.core);
+                if (!resolvedCore) { alert('No EmulatorJS core mapped for this console yet.'); return; }
+                window.EJS_core = resolvedCore;
+                const effectiveCore = selectedCore || ((EMULATORJS_CORES[resolvedCore] || [])[0] || resolvedCore);
+                const requiresThreads = effectiveCore === 'ppsspp' || resolvedCore === 'psp';
+                if (requiresThreads) window.EJS_threads = true;
+                else delete window.EJS_threads;
+                window.EJS_gameUrl = `/roms/${consoleId}/${encodeURIComponent(state.selectedLocalGame.folder)}/${encodeURIComponent(state.selectedLocalGame.rom)}`;
+                window.EJS_pathtodata = 'https://cdn.emulatorjs.org/stable/data/';
+                window.EJS_startOnLoaded = true; // Automatically start loading without extra "Start Game" button
+                window.EJS_AdUrl = ''; // Ensure no ad behavior
+                if (selectedCore) window.EJS_defaultCore = selectedCore;
+                else delete window.EJS_defaultCore;
+                
+                // Clean up any existing scripts to avoid duplicates
+                const existingScript = document.getElementById('ejs-loader');
+                if (existingScript) existingScript.remove();
+
+                const script = document.createElement('script');
+                script.id = 'ejs-loader';
+                script.src = 'https://cdn.emulatorjs.org/stable/data/loader.js';
+                document.body.appendChild(script);
+            }
             
             state.isEmulating = true;
         }
@@ -553,6 +1266,11 @@
         function closeEmulator() {
     const modal = document.getElementById('emulator-modal');
     const target = document.getElementById('emulator-target');
+
+    try {
+        if (window.EJS_emulator?.exit) window.EJS_emulator.exit();
+        if (window.EJS_emulator?.pause) window.EJS_emulator.pause();
+    } catch (e) {}
 
     // Kill everything inside
     target.innerHTML = '';
@@ -573,10 +1291,21 @@
     delete window.EJS_core;
     delete window.EJS_gameUrl;
     delete window.EJS_emulator;
+    delete window.EJS_defaultCore;
+    delete window.EJS_threads;
+    delete window.NepPlayer;
+    delete window.NepEmu;
+    delete window.NepZoom;
+    delete window.NepMaxWidth;
+    delete window.NepLang;
+    delete window.EmuN64air;
+    delete window.gameUrl;
 
     // Remove loader script
     const script = document.getElementById('ejs-loader');
     if (script) script.remove();
+    const nepScript = document.getElementById('neptunjs-loader');
+    if (nepScript) nepScript.remove();
 
     modal.style.display = 'none';
     state.isEmulating = false;
@@ -589,15 +1318,237 @@
 }
 
 
-        async function handleDownloadROM(url) {
-            await API.download(url);
-            showMarketGameDetails(state.lastGameUrl);
-            if (state.selectedConsole) loadLocalGames(state.selectedConsole.id);
+        async function handleDownloadROM(button, url) {
+            if (!button || button.disabled) return;
+            const originalText = button.textContent;
+            button.textContent = 'DOWNLOADING...';
+            button.disabled = true;
+            button.classList.add('cursor-wait', 'opacity-60');
+            try {
+                const response = await API.download(url);
+                if (!response?.job_id) {
+                    throw new Error('Missing job id');
+                }
+                const jobId = response.job_id;
+                let finished = false;
+                while (!finished) {
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    const status = await API.downloadStatus(jobId);
+                    if (status?.job?.status === 'complete') {
+                        finished = true;
+                        button.textContent = 'LINKED';
+                        button.classList.add('cursor-not-allowed');
+                        if (state.selectedConsole) {
+                            await loadConsoleList();
+                            loadLocalGames(state.selectedConsole.id);
+                        } else {
+                            await loadConsoleList();
+                        }
+                    } else if (status?.job?.status === 'error') {
+                        throw new Error(status.job.error || 'Download failed');
+                    }
+                }
+            } catch (e) {
+                button.textContent = originalText;
+                button.disabled = false;
+                button.classList.remove('cursor-wait', 'opacity-60');
+            }
         }
 
-        async function handleDeleteROM(name, consoleId) {
-            await API.delete(name, consoleId);
+        async function renderSettings() {
+            const settings = getSettings();
+            const storeContainer = document.getElementById('settings-stores');
+            const coverContainer = document.getElementById('settings-covers');
+            const localCoverContainer = document.getElementById('settings-local-covers');
+            const addonsContainer = document.getElementById('settings-addons');
+            const emulatorContainer = document.getElementById('settings-emulators');
+            storeContainer.innerHTML = '';
+            coverContainer.innerHTML = '';
+            localCoverContainer.innerHTML = '';
+            addonsContainer.innerHTML = '';
+            emulatorContainer.innerHTML = '';
+
+            MARKET_SOURCE_KEYS.forEach((key) => {
+                const enabled = !!settings.stores[key];
+                const row = document.createElement('label');
+                row.className = 'flex items-center justify-between bg-white/5 rounded-xl px-4 py-3 border border-white/5';
+                row.innerHTML = `
+                    <span class="uppercase tracking-widest">${key}</span>
+                    <input type="checkbox" class="accent-blue-500" ${enabled ? 'checked' : ''}>
+                `;
+                row.querySelector('input').addEventListener('change', (e) => {
+                    settings.stores[key] = e.target.checked;
+                    saveSettings(settings);
+                });
+                storeContainer.appendChild(row);
+            });
+
+            COVER_SOURCE_KEYS.forEach((key) => {
+                const enabled = !!settings.coverSources[key];
+                const row = document.createElement('label');
+                row.className = 'flex items-center justify-between bg-white/5 rounded-xl px-4 py-3 border border-white/5';
+                row.innerHTML = `
+                    <span class="uppercase tracking-widest">${key}</span>
+                    <input type="checkbox" class="accent-blue-500" ${enabled ? 'checked' : ''}>
+                `;
+                row.querySelector('input').addEventListener('change', (e) => {
+                    settings.coverSources[key] = e.target.checked;
+                    saveSettings(settings);
+                });
+                coverContainer.appendChild(row);
+            });
+
+            COVER_SOURCE_KEYS.forEach((key) => {
+                const enabled = !!settings.localCoverSources[key];
+                const row = document.createElement('label');
+                row.className = 'flex items-center justify-between bg-white/5 rounded-xl px-4 py-3 border border-white/5';
+                row.innerHTML = `
+                    <span class="uppercase tracking-widest">${key}</span>
+                    <input type="checkbox" class="accent-blue-500" ${enabled ? 'checked' : ''}>
+                `;
+                row.querySelector('input').addEventListener('change', (e) => {
+                    settings.localCoverSources[key] = e.target.checked;
+                    saveSettings(settings);
+                });
+                localCoverContainer.appendChild(row);
+            });
+
+            state.consoles.forEach(consoleEntry => {
+                const row = document.createElement('div');
+                row.className = 'bg-white/5 rounded-xl px-4 py-3 border border-white/5 space-y-2';
+                row.innerHTML = `<p class="uppercase tracking-widest text-[10px]">${consoleEntry.name}</p>`;
+
+                const providerValue = settings.emulators[consoleEntry.id] || 'emulatorjs';
+                const providerWrap = document.createElement('div');
+                providerWrap.className = 'flex items-center justify-between gap-2';
+                const providerLabel = document.createElement('span');
+                providerLabel.className = 'text-[10px] uppercase text-white/40';
+                providerLabel.textContent = 'Provider';
+                providerWrap.appendChild(providerLabel);
+                providerWrap.appendChild(buildCustomDropdown({
+                    options: [
+                        { value: 'emulatorjs', label: 'EmulatorJS' },
+                        { value: 'neptunjs', label: 'NeptunJS' }
+                    ],
+                    value: providerValue,
+                    onChange: (nextValue) => {
+                        settings.emulators[consoleEntry.id] = nextValue;
+                        saveSettings(settings);
+                        renderSettings();
+                    }
+                }));
+                row.appendChild(providerWrap);
+
+                const coreOptions = getCoreOptionsForConsole(consoleEntry.id);
+                if (coreOptions.length) {
+                    const coreWrap = document.createElement('div');
+                    coreWrap.className = 'flex items-center justify-between gap-2';
+                    const coreLabel = document.createElement('span');
+                    coreLabel.className = 'text-[10px] uppercase text-white/40';
+                    coreLabel.textContent = 'Core';
+                    coreWrap.appendChild(coreLabel);
+                    coreWrap.appendChild(buildCustomDropdown({
+                        options: [{ value: '', label: 'Default' }, ...coreOptions.map(core => ({ value: core, label: core }))],
+                        value: settings.emulatorJsCores[consoleEntry.id] || '',
+                        disabled: providerValue !== 'emulatorjs',
+                        onChange: (nextValue) => {
+                            if (nextValue) settings.emulatorJsCores[consoleEntry.id] = nextValue;
+                            else delete settings.emulatorJsCores[consoleEntry.id];
+                            saveSettings(settings);
+                        }
+                    }));
+                    row.appendChild(coreWrap);
+                }
+
+                emulatorContainer.appendChild(row);
+            });
+
+            const addons = await API.listAddons();
+            if (addons?.addons?.length) {
+                addons.addons.forEach(addon => {
+                    const badge = document.createElement('span');
+                    badge.className = 'px-3 py-1 rounded-full bg-white/5 border border-white/10 text-white/60';
+                    badge.textContent = addon;
+                    addonsContainer.appendChild(badge);
+                });
+            } else {
+                addonsContainer.innerHTML = '<span class="text-white/30">No addons found.</span>';
+            }
+        }
+
+
+        async function loadCoverCandidatesForEdit(consoleId, title) {
+            const grid = document.getElementById('cover-candidates-grid');
+            grid.innerHTML = '<div class="text-[10px] text-white/40 uppercase">Loading...</div>';
+            const settings = getSettings();
+            const sources = COVER_SOURCE_KEYS.filter(key => !!settings.localCoverSources?.[key]);
+            const data = await API.coverCandidates(title, consoleId, sources);
+            const candidates = data?.candidates || [];
+            if (!candidates.length) {
+                grid.innerHTML = '<div class="text-[10px] text-white/30 uppercase">No candidates found.</div>';
+                return;
+            }
+            grid.innerHTML = candidates.map((item, idx) => `
+                <button onclick="selectCoverCandidate('${encodeURIComponent(item.url)}')" class="text-left glass rounded-xl overflow-hidden border border-white/10 hover:border-blue-400/50 transition-all">
+                    <img src="${API.proxyImg(item.url)}" class="w-full h-28 object-cover">
+                    <div class="p-2 text-[9px] uppercase text-white/60 font-black">${item.source} · ${item.type}</div>
+                </button>
+            `).join('');
+        }
+
+        function selectCoverCandidate(encodedUrl) {
+            const url = decodeURIComponent(encodedUrl || '');
+            document.getElementById('edit-game-cover').value = url;
+        }
+
+        async function openEditLocalGame(consoleId) {
+            const game = state.selectedLocalGame;
+            if (!game) return;
+            const modal = document.getElementById('edit-game-modal');
+            modal.style.display = 'flex';
+            document.getElementById('edit-game-title').value = game.title || '';
+            document.getElementById('edit-game-description').value = game.description || game.overview || '';
+            document.getElementById('edit-game-cover').value = game.cover_front || game.clearlogo || '';
+            document.getElementById('edit-game-info').value = JSON.stringify(game.info || {}, null, 2);
+
+            document.getElementById('btn-search-cover-candidates').onclick = () => loadCoverCandidatesForEdit(consoleId, document.getElementById('edit-game-title').value || game.title || game.folder);
+            document.getElementById('btn-save-game-edit').onclick = async () => {
+                let info = {};
+                try { info = JSON.parse(document.getElementById('edit-game-info').value || '{}'); }
+                catch (e) { alert('Info JSON is invalid.'); return; }
+                const payload = {
+                    console: consoleId,
+                    folder: game.folder,
+                    title: document.getElementById('edit-game-title').value,
+                    description: document.getElementById('edit-game-description').value,
+                    cover_front: document.getElementById('edit-game-cover').value,
+                    info
+                };
+                const res = await API.updateLocalMetadata(payload);
+                if (res?.status !== 'ok') {
+                    alert(res?.message || 'Failed to update metadata.');
+                    return;
+                }
+                modal.style.display = 'none';
+                await loadLocalGames(consoleId);
+                const updated = (state.localGames || []).find(g => g.folder === game.folder);
+                if (updated) showLocalGameDetails(updated, consoleId);
+            };
+            document.getElementById('btn-close-game-edit').onclick = () => { modal.style.display = 'none'; };
+            await loadCoverCandidatesForEdit(consoleId, game.title || game.folder);
+        }
+
+        async function updateLocalFilesFromSettings() {
+            await rescanLibraryMetadata();
+        }
+        async function handleDeleteROM(name, consoleId, isFolder = false) {
+            if (isFolder) {
+                await API.delete("", consoleId, name);
+            } else {
+                await API.delete(name, consoleId);
+            }
             if (state.view === 'LIBRARY') {
+                state.selectedLocalGame = null;
                 loadLocalGames(consoleId);
                 document.getElementById('library-detail-container').innerHTML = `<div class="h-full flex flex-col items-center justify-center text-white/10 text-center py-20 uppercase italic tracking-widest text-[9px]">Module Purged.</div>`;
             } else if (state.view === 'MARKET-DETAIL') {
@@ -611,12 +1562,17 @@
         }
 
         document.getElementById('search-input').addEventListener('keypress', (e) => e.key === 'Enter' && doSearch());
+                document.getElementById('btn-rescan-metadata').addEventListener('click', rescanLibraryMetadata);
+                document.getElementById('btn-update-local-files').addEventListener('click', updateLocalFilesFromSettings);
+
+        document.addEventListener('click', () => closeAllCustomDropdowns());
 
         document.addEventListener('DOMContentLoaded', () => {
-            renderConsoles();
+            loadConsoleList();
             updateClock();
             setInterval(updateClock, 10000);
             updateBreadcrumbs();
+            renderSettings();
             const status = document.getElementById('system-status');
             setInterval(() => status.style.opacity = (status.style.opacity === '0.3' ? '1' : '0.3'), 1500);
         });
