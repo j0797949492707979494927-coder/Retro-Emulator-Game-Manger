@@ -2,7 +2,7 @@ from flask import Flask, jsonify, request, send_from_directory
 from bs4 import BeautifulSoup
 import json
 import base64
-import os, re, shutil, threading, urllib.parse, uuid, requests
+import os, re, shutil, threading, urllib.parse, uuid, requests, urllib3
 from datetime import datetime
 from difflib import SequenceMatcher
 
@@ -30,6 +30,7 @@ os.makedirs(LOG_DIR, exist_ok=True)
 
 VIMM_SESSION = requests.Session()
 VIMM_SESSION.trust_env = False
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 VIMM_SYSTEM_MAP = {
     "dendy": "NES",
@@ -99,6 +100,8 @@ download_jobs = {}
 # ------------------------------
 # Helper: GET with user-agent
 def curl_get(url):
+    if "vimm.net" in (url or ""):
+        return vimm_request(url).text
     headers = {"User-Agent": "Mozilla/5.0"}
     return requests.get(url, headers=headers).text
 
@@ -597,26 +600,53 @@ def parse_vimm_rom_page(html, url, console_id=None):
         "console": vimm_system_for_console(console_id) or "VIMM Vault"
     }
 
-    title_canvas = soup.find("canvas", id="canvas2")
-    if title_canvas and title_canvas.get("data-v"):
+    def decode_canvas_value(node):
+        if not node or not node.get("data-v"):
+            return None
         try:
-            data["title"] = base64.b64decode(title_canvas["data-v"]).decode("utf-8")
+            return base64.b64decode(node["data-v"]).decode("utf-8").strip()
         except Exception:
-            data["title"] = None
+            return None
+
+    # VIMM commonly stores display title in #canvas and filename in #canvas2.
+    title_text = decode_canvas_value(soup.find("canvas", id="canvas"))
+    filename_text = decode_canvas_value(soup.find("canvas", id="canvas2"))
+    data["title"] = title_text or filename_text
+    if filename_text:
+        data["info"]["filename"] = filename_text
+
+    section_title = soup.select_one("div.sectionTitle")
+    if section_title:
+        section_value = section_title.get_text(" ", strip=True)
+        if section_value:
+            data["console"] = section_value
+            data["info"]["console"] = section_value
 
     def get_row_value(name):
-        td = soup.find("td", string=name)
+        td = soup.find("td", string=lambda t: isinstance(t, str) and t.strip() == name)
         if not td:
             return None
         v1 = td.find_next_sibling("td")
         v2 = v1.find_next_sibling("td") if v1 else None
         return v2.get_text(" ", strip=True) if v2 else None
 
-    region_img = soup.select_one("td div img.flag")
-    if region_img and region_img.get("title"):
-        data["info"]["region"] = region_img.get("title")
+    region_nodes = soup.select("img.flag[title]")
+    if region_nodes:
+        regions = [n.get("title", "").strip() for n in region_nodes if n.get("title")]
+        regions = [r for r in regions if r]
+        if regions:
+            data["info"]["region"] = ", ".join(dict.fromkeys(regions))
 
-    for key, label in (("players", "Players"), ("year", "Year"), ("graphics", "Graphics"), ("sound", "Sound"), ("gameplay", "Gameplay"), ("overall", "Overall")):
+    for key, label in (
+        ("players", "Players"),
+        ("year", "Year"),
+        ("cart_size", "Cart Size"),
+        ("version", "Version"),
+        ("graphics", "Graphics"),
+        ("sound", "Sound"),
+        ("gameplay", "Gameplay"),
+        ("overall", "Overall"),
+    ):
         value = get_row_value(label)
         if value:
             data["info"][key] = value
@@ -625,6 +655,20 @@ def parse_vimm_rom_page(html, url, console_id=None):
         node = soup.find("span", id=span_id)
         if node and node.text.strip():
             data["info"][key] = node.text.strip()
+
+    desc_node = soup.select_one("div#description, div.description, p.description, p.game-overview")
+    if desc_node:
+        text = " ".join(desc_node.get_text(" ", strip=True).split())
+        if text:
+            data["description"] = text
+
+    # Fallback to og/twitter description when page body doesn't expose a dedicated description block.
+    if not data["description"]:
+        meta_desc = soup.select_one('meta[property="og:description"], meta[name="description"], meta[name="twitter:description"]')
+        if meta_desc and meta_desc.get("content"):
+            text = " ".join(meta_desc["content"].split())
+            if text:
+                data["description"] = text
 
     game_id = url.rstrip("/").split("/")[-1]
     if game_id.isdigit():
@@ -636,10 +680,14 @@ def parse_vimm_rom_page(html, url, console_id=None):
     if dl_form:
         media_input = dl_form.find("input", {"name": "mediaId"})
         media_id = media_input.get("value") if media_input else None
+        size_node = soup.find("td", id="dl_size")
+        if size_node and size_node.get_text(strip=True):
+            data["info"]["download_size"] = size_node.get_text(" ", strip=True)
 
     rom_name = f"{(data.get('title') or game_id or 'rom').strip()}.zip"
     rom_name = sanitize_filename(rom_name)
     if media_id:
+        data["info"]["media_id"] = media_id
         encoded_game = urllib.parse.quote(url, safe='')
         encoded_name = urllib.parse.quote(rom_name, safe='')
         encoded_media = urllib.parse.quote(media_id, safe='')
