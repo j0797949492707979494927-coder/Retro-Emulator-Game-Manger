@@ -364,7 +364,7 @@
         const API = {
             search: (q, consoleId) => { const params = new URLSearchParams({ q }); if (consoleId) params.set('console', consoleId); return fetch(`/search?${params.toString()}`).then(r => r.json()); },
             getGame: (url) => fetch(`/game?url=${encodeURIComponent(url)}`).then(r => r.json()),
-            getMarketCover: (title, console) => fetch(`/market_cover?title=${encodeURIComponent(title)}&console=${encodeURIComponent(console || '')}`).then(r => r.json()),
+            getMarketCover: (title, console, coverSources) => { const params = new URLSearchParams({ title, console: console || '' }); if (coverSources?.length) params.set('cover_sources', coverSources.join(',')); return fetch(`/market_cover?${params.toString()}`).then(r => r.json()); },
             listLocal: (console) => fetch(`/list_console?console=${console}`).then(r => r.json()),
             listConsoles: () => fetch(`/list_consoles`).then(r => r.json()),
             listAddons: () => fetch(`/addons`).then(r => r.json()),
@@ -806,6 +806,9 @@
                 const targetConsole = state.selectedConsole?.id || '';
                 const params = new URLSearchParams();
                 if (targetConsole) params.set('console', targetConsole);
+                const settings = getSettings();
+                const coverSources = Object.entries(settings.coverSources || {}).filter(([_, enabled]) => !!enabled).map(([key]) => key);
+                if (coverSources.length) params.set('cover_sources', coverSources.join(','));
                 const data = await fetch(`/refresh_covers?${params.toString()}`).then(r => r.json());
                 alert(`Metadata rescan complete. Updated: ${data.updated || 0}, Skipped: ${data.skipped || 0}`);
                 if (state.selectedConsole) await loadLocalGames(state.selectedConsole.id);
@@ -820,11 +823,13 @@
         function getSettings() {
             const defaults = {
                 stores: {
+                    libreto: true,
                     vimm: true,
                     emuland: false,
                     thegamesdb: true
                 },
                 coverSources: {
+                    libreto: true,
                     vimm: true,
                     emuland: true,
                     thegamesdb: true
@@ -941,9 +946,12 @@
                 let marketCover = game.thumbnail;
                 if (!marketCover) {
                     try {
-                        const coverResponse = await API.getMarketCover(game.title, game.console);
+                        const coverSources = Object.entries(getSettings().coverSources || {}).filter(([_, enabled]) => !!enabled).map(([key]) => key);
+                        const coverResponse = await API.getMarketCover(game.title, game.console, coverSources);
                         if (coverResponse?.cover) {
                             marketCover = coverResponse.cover;
+                        } else if (coverResponse?.screenshots?.length) {
+                            marketCover = coverResponse.screenshots[0];
                         }
                     } catch (e) {}
                 }

@@ -4,6 +4,7 @@ import json
 import base64
 import os, re, shutil, threading, urllib.parse, uuid, requests
 from datetime import datetime
+from difflib import SequenceMatcher
 
 app = Flask(__name__, static_folder="ui", static_url_path="")
 
@@ -48,6 +49,33 @@ VIMM_SYSTEM_MAP = {
     "psp": "PSP",
 }
 
+LIBRETO_DB_DIR = "libreto db"
+LIBRETO_SYSTEM_ALIASES = {
+    "ps3": "Sony - PlayStation 3",
+    "ps2": "Sony - PlayStation 2",
+    "ps1": "Sony - PlayStation",
+    "psx": "Sony - PlayStation",
+    "playstation3": "Sony - PlayStation 3",
+    "playstation2": "Sony - PlayStation 2",
+    "playstation1": "Sony - PlayStation",
+    "playstation": "Sony - PlayStation",
+    "gba": "Nintendo - Game Boy Advance",
+    "gb": "Nintendo - Game Boy",
+    "gbc": "Nintendo - Game Boy Color",
+    "nds": "Nintendo - Nintendo DS",
+    "ds": "Nintendo - Nintendo DS",
+    "3ds": "Nintendo - Nintendo 3DS",
+    "wii": "Nintendo - Wii",
+    "wiiu": "Nintendo - Wii U",
+    "n64": "Nintendo - Nintendo 64",
+    "snes": "Nintendo - Super Nintendo Entertainment System",
+    "nes": "Nintendo - Nintendo Entertainment System",
+    "xbox": "Microsoft - Xbox",
+    "xbox360": "Microsoft - Xbox 360",
+}
+LIBRETO_REGION_PRIORITY = ["usa", "europe", "world", "japan"]
+_LIBRETO_CACHE = None
+
 def has_cover_metadata(metadata):
     if not metadata:
         return False
@@ -78,6 +106,169 @@ def safe_url(url):
         url = "https:" + url
     # Do NOT quote the path, just return as-is
     return url
+
+def normalize_text(text):
+    text = (text or "").lower()
+    text = re.sub(r"[^a-z0-9\s]", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+def region_rank(value):
+    raw = normalize_text(value)
+    for idx, region in enumerate(LIBRETO_REGION_PRIORITY):
+        if region in raw:
+            return idx
+    return len(LIBRETO_REGION_PRIORITY)
+
+def int_to_roman(num):
+    table = [(10, 'X'), (9, 'IX'), (5, 'V'), (4, 'IV'), (1, 'I')]
+    out = []
+    for value, roman in table:
+        while num >= value:
+            out.append(roman)
+            num -= value
+    return ''.join(out)
+
+def create_numeral_variants(tokens):
+    variants = [tokens]
+    as_roman = []
+    has_roman = False
+    for token in tokens:
+        if token.isdigit() and 1 <= int(token) <= 20:
+            as_roman.append(int_to_roman(int(token)).lower())
+            has_roman = True
+        else:
+            as_roman.append(token)
+    if has_roman:
+        variants.append(as_roman)
+    return variants
+
+def load_libreto_consoles():
+    global _LIBRETO_CACHE
+    if _LIBRETO_CACHE is not None:
+        return _LIBRETO_CACHE
+    consoles = {}
+    if not os.path.isdir(LIBRETO_DB_DIR):
+        _LIBRETO_CACHE = consoles
+        return consoles
+    for folder in os.listdir(LIBRETO_DB_DIR):
+        path = os.path.join(LIBRETO_DB_DIR, folder, "index.json")
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                consoles[folder] = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            continue
+    _LIBRETO_CACHE = consoles
+    return consoles
+
+def libreto_system_name(console_id, available_systems):
+    if not available_systems:
+        return None
+    normalized = normalize_text(console_id)
+    alias = LIBRETO_SYSTEM_ALIASES.get(normalized)
+    if alias and alias in available_systems:
+        return alias
+    if console_id in available_systems:
+        return console_id
+    scored = []
+    for system in available_systems:
+        score = SequenceMatcher(None, normalize_text(system), normalized).ratio()
+        scored.append((score, system))
+    scored.sort(reverse=True)
+    return scored[0][1] if scored and scored[0][0] >= 0.45 else None
+
+def iter_libreto_games(system_payload):
+    media = (system_payload or {}).get("media") or {}
+    for media_type, games in media.items():
+        if not isinstance(games, dict):
+            continue
+        for game_name, info in games.items():
+            yield media_type, game_name, (info or {})
+
+def pick_url_list(value):
+    if isinstance(value, str):
+        return [safe_url(value)] if value else []
+    if isinstance(value, list):
+        out = []
+        for item in value:
+            if isinstance(item, str):
+                u = safe_url(item)
+                if u:
+                    out.append(u)
+        return out
+    return []
+
+def score_libreto_title(query, candidate):
+    query_tokens = normalize_text(query).split()
+    variants = create_numeral_variants(query_tokens)
+    cand_norm = normalize_text(candidate)
+    best = 0
+    for variant in variants:
+        variant_str = " ".join(variant)
+        ratio = SequenceMatcher(None, variant_str, cand_norm).ratio()
+        token_hits = 0
+        for token in variant:
+            if len(token) < 2:
+                continue
+            if token in cand_norm:
+                token_hits += 1
+        token_ratio = token_hits / max(len(variant), 1)
+        best = max(best, (ratio * 0.65) + (token_ratio * 0.35))
+    return best
+
+def get_libreto_art(title, console_id=None):
+    consoles = load_libreto_consoles()
+    if not consoles:
+        return None
+
+    system_name = libreto_system_name(console_id or "", list(consoles.keys())) if console_id else None
+    candidates = [system_name] if system_name else list(consoles.keys())
+    candidates = [c for c in candidates if c in consoles]
+    if not candidates:
+        return None
+
+    best = None
+    for system in candidates:
+        for media_type, game_name, info in iter_libreto_games(consoles.get(system)):
+            score = score_libreto_title(title, game_name)
+            if score < 0.4:
+                continue
+            region_value = info.get("region", "")
+            item = (score, -region_rank(region_value), system, media_type, game_name, info)
+            if best is None or item > best:
+                best = item
+
+    if not best:
+        return None
+
+    _, _, system, media_type, game_name, info = best
+    cover = None
+    for key in ("cover_front", "box", "box_front", "cover", "box_art"):
+        cover = next(iter(pick_url_list(info.get(key))), None)
+        if cover:
+            break
+
+    fanart = []
+    for key in ("screenshots", "screenshot", "screen", "fanart", "images"):
+        fanart.extend(pick_url_list(info.get(key)))
+
+    clearlogo = None
+    for key in ("clearlogo", "logo", "marquee"):
+        clearlogo = next(iter(pick_url_list(info.get(key))), None)
+        if clearlogo:
+            break
+
+    return {
+        "title": game_name,
+        "platform": system,
+        "media_type": media_type,
+        "region": info.get("region", ""),
+        "cover_front": cover,
+        "fanart": list(dict.fromkeys([u for u in fanart if u])),
+        "clearlogo": clearlogo,
+        "url": f"libreto://{urllib.parse.quote(system)}/{urllib.parse.quote(game_name)}"
+    }
 
 def log_request(url, status_code):
     now = datetime.now()
@@ -568,50 +759,58 @@ def merge_metadata(existing, incoming):
     merged["fanart"] = list(dict.fromkeys((merged.get("fanart") or []) + (incoming or {}).get("fanart", [])))
     return merged
 
-def enrich_metadata(game_folder, base_name, console_id, seed_title=None):
+def enrich_metadata(game_folder, base_name, console_id, seed_title=None, cover_sources=None):
     metadata_path = os.path.join(game_folder, "metadata.json")
     existing = load_local_metadata(metadata_path) or {}
     title = seed_title or existing.get("title") or base_name
     merged = dict(existing)
+    source_set = set(cover_sources or ["libreto", "vimm", "thegamesdb"])
+
+    if "libreto" in source_set:
+        libreto_data = get_libreto_art(title, console_id=console_id)
+        if libreto_data:
+            merged = merge_metadata(merged, libreto_data)
 
     # Prefer VIMM data first (default market), then merge with TheGamesDB enrichment.
-    source_url = (existing.get("source_url") or "").strip()
-    vimm_url = source_url if "vimm.net" in source_url else None
-    if not vimm_url and title:
-        try:
-            vimm_candidates = search_vimm_games(title, console_id=console_id)
-            vimm_url = vimm_candidates[0]["link"] if vimm_candidates else None
-        except requests.RequestException:
-            vimm_url = None
+    if "vimm" in source_set:
+        source_url = (existing.get("source_url") or "").strip()
+        vimm_url = source_url if "vimm.net" in source_url else None
+        if not vimm_url and title:
+            try:
+                vimm_candidates = search_vimm_games(title, console_id=console_id)
+                vimm_url = vimm_candidates[0]["link"] if vimm_candidates else None
+            except requests.RequestException:
+                vimm_url = None
 
-    if vimm_url:
-        try:
-            vimm_html = vimm_request(vimm_url).text
-            vimm_data = parse_vimm_rom_page(vimm_html, vimm_url, console_id=console_id)
-            vimm_incoming = {
-                "title": vimm_data.get("title"),
-                "players": (vimm_data.get("info") or {}).get("players"),
-                "release_date": (vimm_data.get("info") or {}).get("year"),
-                "cover_front": vimm_data.get("thumbnail"),
-                "fanart": vimm_data.get("screenshots") or [],
-                "url": vimm_url
-            }
-            merged = merge_metadata(merged, vimm_incoming)
-        except requests.RequestException:
-            pass
+        if vimm_url:
+            try:
+                vimm_html = vimm_request(vimm_url).text
+                vimm_data = parse_vimm_rom_page(vimm_html, vimm_url, console_id=console_id)
+                vimm_incoming = {
+                    "title": vimm_data.get("title"),
+                    "players": (vimm_data.get("info") or {}).get("players"),
+                    "release_date": (vimm_data.get("info") or {}).get("year"),
+                    "cover_front": vimm_data.get("thumbnail"),
+                    "fanart": vimm_data.get("screenshots") or [],
+                    "url": vimm_url
+                }
+                merged = merge_metadata(merged, vimm_incoming)
+            except requests.RequestException:
+                pass
 
-    platform_id = THEGAMESDB_PLATFORMS.get(console_id)
-    try:
-        results = search_thegamesdb(title, platform_id=platform_id, limit=1)
-    except requests.RequestException:
-        results = []
-
-    if results:
+    if "thegamesdb" in source_set:
+        platform_id = THEGAMESDB_PLATFORMS.get(console_id)
         try:
-            incoming = scrape_thegamesdb_details(results[0]["url"])
-            merged = merge_metadata(merged, incoming)
+            results = search_thegamesdb(title, platform_id=platform_id, limit=1)
         except requests.RequestException:
-            pass
+            results = []
+
+        if results:
+            try:
+                incoming = scrape_thegamesdb_details(results[0]["url"])
+                merged = merge_metadata(merged, incoming)
+            except requests.RequestException:
+                pass
 
     assets_dir = os.path.join(game_folder, "assets")
     os.makedirs(assets_dir, exist_ok=True)
@@ -635,7 +834,7 @@ def enrich_metadata(game_folder, base_name, console_id, seed_title=None):
         json.dump(merged, f, ensure_ascii=False, indent=2)
     return merged
 
-def refresh_missing_covers(target_console=None):
+def refresh_missing_covers(target_console=None, cover_sources=None):
     updated = 0
     skipped = 0
     consoles = [target_console] if target_console else os.listdir(ROM_DIR)
@@ -652,7 +851,7 @@ def refresh_missing_covers(target_console=None):
             if not metadata_needs_enrichment(metadata):
                 skipped += 1
                 continue
-            enrich_metadata(entry_path, entry, console_id, seed_title=(metadata or {}).get("title"))
+            enrich_metadata(entry_path, entry, console_id, seed_title=(metadata or {}).get("title"), cover_sources=cover_sources)
             updated += 1
     return {"updated": updated, "skipped": skipped}
 
@@ -716,7 +915,7 @@ def run_download_job(job_id, rom_url, rom_name, console, game_url, media_id=None
                 merged = merge_metadata(existing_metadata, metadata)
                 with open(metadata_path, "w", encoding="utf-8") as f:
                     json.dump(merged, f, ensure_ascii=False, indent=2)
-                enrich_metadata(game_folder, base_name, console, seed_title=merged.get("title"))
+                enrich_metadata(game_folder, base_name, console, seed_title=merged.get("title"), cover_sources=["libreto", "vimm", "thegamesdb"])
         download_jobs[job_id]["status"] = "complete"
     except Exception as exc:
         download_jobs[job_id]["status"] = "error"
@@ -859,8 +1058,10 @@ def list_consoles_route():
 @app.route("/refresh_covers")
 def refresh_covers():
     console = request.args.get("console")
-    results = refresh_missing_covers(console)
-    return jsonify({"status": "ok", **results})
+    cover_sources_raw = request.args.get("cover_sources", "")
+    cover_sources = [s.strip().lower() for s in cover_sources_raw.split(",") if s.strip()]
+    results = refresh_missing_covers(console, cover_sources=cover_sources or None)
+    return jsonify({"status": "ok", "cover_sources": cover_sources or ["libreto", "vimm", "thegamesdb"], **results})
 
 @app.route("/download_status")
 def download_status():
@@ -876,20 +1077,34 @@ def market_cover():
     if not title:
         return jsonify({"status": "error", "message": "Missing title"}), 400
 
-    cover = None
-    try:
-        vimm_results = search_vimm_games(title, console_id=console)
-        if vimm_results and vimm_results[0].get("thumbnail"):
-            cover = vimm_results[0]["thumbnail"]
-    except requests.RequestException:
-        cover = None
+    cover_sources_raw = request.args.get("cover_sources", "")
+    cover_sources = [s.strip().lower() for s in cover_sources_raw.split(",") if s.strip()] or ["libreto", "vimm", "thegamesdb"]
 
-    if not cover:
+    cover = None
+    clearlogo = None
+    screenshots = []
+
+    if "libreto" in cover_sources:
+        libreto_data = get_libreto_art(title, console_id=console)
+        if libreto_data:
+            cover = libreto_data.get("cover_front") or cover
+            clearlogo = libreto_data.get("clearlogo") or clearlogo
+            screenshots = libreto_data.get("fanart") or screenshots
+
+    if not cover and "vimm" in cover_sources:
+        try:
+            vimm_results = search_vimm_games(title, console_id=console)
+            if vimm_results and vimm_results[0].get("thumbnail"):
+                cover = vimm_results[0]["thumbnail"]
+        except requests.RequestException:
+            cover = None
+
+    if not cover and "thegamesdb" in cover_sources:
         try:
             cover = get_thegamesdb_cover(title, console_id=console)
         except requests.RequestException:
             cover = None
-    return jsonify({"status": "ok", "cover": cover})
+    return jsonify({"status": "ok", "cover": cover, "clearlogo": clearlogo, "screenshots": screenshots, "cover_sources": cover_sources})
 
 @app.route("/addons")
 def list_addons():
