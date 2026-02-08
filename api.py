@@ -382,13 +382,37 @@ def log_request(url, status_code):
     with open(log_file, "a", encoding="utf-8") as f:
         f.write(f"[{now.strftime('%H:%M:%S')}] Requested URL: {url} | Status: {status_code}\n")
 
+
+def log_vimm_debug(message, details=None):
+    now = datetime.now()
+    log_file = os.path.join(LOG_DIR, f"{now.strftime('%Y-%m-%d')}.log")
+    payload = {
+        "message": message,
+        "details": details or {}
+    }
+    with open(log_file, "a", encoding="utf-8") as f:
+        f.write(f"[{now.strftime('%H:%M:%S')}] VIMM DEBUG: {json.dumps(payload, ensure_ascii=False)}\n")
+
 def vimm_request(url, method="GET", **kwargs):
     kwargs.setdefault("headers", VIMM_REQUEST_HEADERS)
     kwargs.setdefault("timeout", 20)
-    response = requests.request(method, url, **kwargs)
-    log_request(response.url, response.status_code)
-    response.raise_for_status()
-    return response
+    try:
+        response = requests.request(method, url, **kwargs)
+        log_request(response.url, response.status_code)
+        response.raise_for_status()
+        return response
+    except requests.RequestException as exc:
+        req_url = None
+        try:
+            req_url = exc.request.url if getattr(exc, "request", None) else url
+        except Exception:
+            req_url = url
+        log_vimm_debug("request_failed", {
+            "method": method,
+            "url": req_url,
+            "error": str(exc)
+        })
+        raise
 
 def vimm_system_for_console(console_id=None):
     if not console_id:
@@ -482,7 +506,7 @@ def parse_vimm_search_html(html, console_label=None):
         out.append(game)
     return out
 
-def search_vimm_games(query, console_id=None):
+def search_vimm_games(query, console_id=None, diagnostics=None):
     console_label = vimm_system_for_console(console_id)
     base_params = {
         "mode": "adv",
@@ -497,14 +521,38 @@ def search_vimm_games(query, console_id=None):
         attempts.append({**base_params, "system": console_label})
     attempts.append({**base_params, "system": ""})
 
+    if diagnostics is not None:
+        diagnostics.append({
+            "event": "start",
+            "query": query,
+            "console_id": console_id,
+            "attempts": len(attempts)
+        })
+
     for params in attempts:
-        response = vimm_request(VIMM_BASE_URL + "/", params=params)
-        games = parse_vimm_search_html(response.text, console_label=console_label or "VIMM Vault")
-        if games:
-            if console_id:
-                for g in games:
-                    g["console_id"] = (console_id or "vimm").lower()
-            return games
+        try:
+            response = vimm_request(VIMM_BASE_URL + "/", params=params)
+            games = parse_vimm_search_html(response.text, console_label=console_label or "VIMM Vault")
+            if diagnostics is not None:
+                diagnostics.append({
+                    "event": "attempt_result",
+                    "url": response.url,
+                    "system": params.get("system", ""),
+                    "game_count": len(games)
+                })
+            if games:
+                if console_id:
+                    for g in games:
+                        g["console_id"] = (console_id or "vimm").lower()
+                return games
+        except requests.RequestException as exc:
+            if diagnostics is not None:
+                diagnostics.append({
+                    "event": "attempt_error",
+                    "system": params.get("system", ""),
+                    "error": str(exc)
+                })
+            continue
 
     return []
 
@@ -1117,6 +1165,8 @@ def search():
     stores_raw = request.args.get("stores", "")
     stores = [part.strip().lower() for part in stores_raw.split(",") if part.strip()]
     enabled_stores = stores or ["vimm", "emuland"]
+    debug = request.args.get("debug", "").strip().lower() in {"1", "true", "yes", "on"}
+    diagnostics = []
 
     if not q:
         return jsonify({"status": "ok", "games": [], "stores": enabled_stores})
@@ -1126,11 +1176,22 @@ def search():
 
     if "vimm" in enabled_stores:
         try:
-            vimm_games = search_vimm_games(q, console_id=console)
+            vimm_games = search_vimm_games(q, console_id=console, diagnostics=diagnostics)
             if vimm_games:
-                return jsonify({"status": "ok", "games": vimm_games, "source": "vimm", "stores": enabled_stores})
-        except requests.RequestException:
-            pass
+                payload = {"status": "ok", "games": vimm_games, "source": "vimm", "stores": enabled_stores}
+                if debug:
+                    payload["diagnostics"] = diagnostics
+                return jsonify(payload)
+        except requests.RequestException as exc:
+            diagnostics.append({"event": "vimm_error", "error": str(exc)})
+
+    if diagnostics:
+        log_vimm_debug("search_endpoint", {
+            "query": q,
+            "console": console,
+            "stores": enabled_stores,
+            "diagnostics": diagnostics
+        })
 
     if "emuland" in enabled_stores:
         url = f"https://www.emu-land.net/en/search_games?id=all&genre=--&players=--&q={q}"
@@ -1139,9 +1200,17 @@ def search():
             games = parse_search(html)
         except requests.RequestException:
             games = []
-        return jsonify({"status":"ok","games":games, "source": "emuland", "stores": enabled_stores})
+        payload = {"status":"ok","games":games, "source": "emuland", "stores": enabled_stores}
+        if debug:
+            payload["diagnostics"] = diagnostics
+        return jsonify(payload)
 
-    return jsonify({"status": "ok", "games": [], "source": "none", "stores": enabled_stores})
+    payload = {"status": "ok", "games": [], "source": "none", "stores": enabled_stores}
+    if diagnostics:
+        payload["vimm_status"] = "request_failed_or_no_matches"
+    if debug:
+        payload["diagnostics"] = diagnostics
+    return jsonify(payload)
 
 @app.route("/game")
 def game_page():
