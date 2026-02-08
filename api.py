@@ -24,8 +24,12 @@ THEGAMESDB_PLATFORMS = {
 
 VIMM_BASE_URL = "https://vimm.net/vault"
 VIMM_REQUEST_HEADERS = {"User-Agent": "Mozilla/5.0 (Retro-Emulator-Game-Manger/1.0)"}
+VIMM_REQUEST_TIMEOUT = 20
 LOG_DIR = "logs"
 os.makedirs(LOG_DIR, exist_ok=True)
+
+VIMM_SESSION = requests.Session()
+VIMM_SESSION.trust_env = False
 
 VIMM_SYSTEM_MAP = {
     "dendy": "NES",
@@ -395,9 +399,11 @@ def log_vimm_debug(message, details=None):
 
 def vimm_request(url, method="GET", **kwargs):
     kwargs.setdefault("headers", VIMM_REQUEST_HEADERS)
-    kwargs.setdefault("timeout", 20)
+    kwargs.setdefault("timeout", VIMM_REQUEST_TIMEOUT)
+    kwargs.setdefault("verify", False)
+    kwargs.setdefault("allow_redirects", True)
     try:
-        response = requests.request(method, url, **kwargs)
+        response = VIMM_SESSION.request(method, url, **kwargs)
         log_request(response.url, response.status_code)
         response.raise_for_status()
         return response
