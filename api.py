@@ -75,6 +75,7 @@ LIBRETO_SYSTEM_ALIASES = {
 }
 LIBRETO_REGION_PRIORITY = ["usa", "europe", "world", "japan"]
 _LIBRETO_CACHE = None
+_LIBRETO_GAME_INDEX = None
 
 def has_cover_metadata(metadata):
     if not metadata:
@@ -143,7 +144,7 @@ def create_numeral_variants(tokens):
     return variants
 
 def load_libreto_consoles():
-    global _LIBRETO_CACHE
+    global _LIBRETO_CACHE, _LIBRETO_GAME_INDEX
     if _LIBRETO_CACHE is not None:
         return _LIBRETO_CACHE
     consoles = {}
@@ -160,6 +161,7 @@ def load_libreto_consoles():
         except (OSError, json.JSONDecodeError):
             continue
     _LIBRETO_CACHE = consoles
+    _LIBRETO_GAME_INDEX = None
     return consoles
 
 def libreto_system_name(console_id, available_systems):
@@ -217,10 +219,30 @@ def score_libreto_title(query, candidate):
         best = max(best, (ratio * 0.65) + (token_ratio * 0.35))
     return best
 
+def load_libreto_game_index(consoles):
+    global _LIBRETO_GAME_INDEX
+    if _LIBRETO_GAME_INDEX is not None:
+        return _LIBRETO_GAME_INDEX
+    index = {}
+    for system, payload in (consoles or {}).items():
+        rows = []
+        for media_type, game_name, info in iter_libreto_games(payload):
+            rows.append({
+                "media_type": media_type,
+                "game_name": game_name,
+                "name_norm": normalize_text(game_name),
+                "info": info or {}
+            })
+        index[system] = rows
+    _LIBRETO_GAME_INDEX = index
+    return index
+
 def get_libreto_art(title, console_id=None):
     consoles = load_libreto_consoles()
     if not consoles:
         return None
+
+    index = load_libreto_game_index(consoles)
 
     system_name = libreto_system_name(console_id or "", list(consoles.keys())) if console_id else None
     candidates = [system_name] if system_name else list(consoles.keys())
@@ -228,14 +250,25 @@ def get_libreto_art(title, console_id=None):
     if not candidates:
         return None
 
+    query_norm = normalize_text(title)
+    query_tokens = [t for t in query_norm.split() if len(t) >= 2]
+
     best = None
     for system in candidates:
-        for media_type, game_name, info in iter_libreto_games(consoles.get(system)):
-            score = score_libreto_title(title, game_name)
+        rows = index.get(system, [])
+        # Fast pre-filter by token inclusion.
+        filtered = rows
+        if query_tokens:
+            tmp = [r for r in rows if any(tok in r["name_norm"] for tok in query_tokens)]
+            if tmp:
+                filtered = tmp
+
+        for row in filtered:
+            score = score_libreto_title(title, row["game_name"])
             if score < 0.4:
                 continue
-            region_value = info.get("region", "")
-            item = (score, -region_rank(region_value), system, media_type, game_name, info)
+            region_value = row["info"].get("region", "")
+            item = (score, -region_rank(region_value), system, row["media_type"], row["game_name"], row["info"])
             if best is None or item > best:
                 best = item
 
@@ -269,6 +302,7 @@ def get_libreto_art(title, console_id=None):
         "clearlogo": clearlogo,
         "url": f"libreto://{urllib.parse.quote(system)}/{urllib.parse.quote(game_name)}"
     }
+
 
 def log_request(url, status_code):
     now = datetime.now()

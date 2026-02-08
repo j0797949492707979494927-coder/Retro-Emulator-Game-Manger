@@ -363,7 +363,7 @@
     <script>
         const API = {
             search: (q, consoleId, stores) => { const params = new URLSearchParams({ q }); if (consoleId) params.set('console', consoleId); if (stores?.length) params.set('stores', stores.join(',')); return fetch(`/search?${params.toString()}`).then(r => r.json()); },
-            getGame: (url) => fetch(`/game?url=${encodeURIComponent(url)}`).then(r => r.json()),
+            getGame: (url, consoleId) => fetch(`/game?url=${encodeURIComponent(url)}${consoleId ? `&console=${encodeURIComponent(consoleId)}` : ''}`).then(r => r.json()),
             getMarketCover: (title, console, coverSources) => { const params = new URLSearchParams({ title, console: console || '' }); if (coverSources?.length) params.set('cover_sources', coverSources.join(',')); return fetch(`/market_cover?${params.toString()}`).then(r => r.json()); },
             listLocal: (console) => fetch(`/list_console?console=${console}`).then(r => r.json()),
             listConsoles: () => fetch(`/list_consoles`).then(r => r.json()),
@@ -569,10 +569,14 @@
             { label: 'Sony PlayStation', path: 'Icons/Consoles/Sony/Sony PlayStation.png' }
         ];
 
+        const MARKET_SOURCE_KEYS = ['vimm', 'emuland'];
+        const COVER_SOURCE_KEYS = ['libreto', 'vimm', 'emuland', 'thegamesdb'];
+
         let state = {
             view: 'HOME',
             selectedConsole: null,
             lastGameUrl: "",
+            lastGameConsole: '',
             isEmulating: false,
             localGames: [],
             selectedLocalGame: null,
@@ -839,9 +843,11 @@
             };
             try {
                 const stored = JSON.parse(localStorage.getItem('settings') || '{}');
+                const mergedStores = { ...defaults.stores, ...(stored.stores || {}) };
+                const mergedCoverSources = { ...defaults.coverSources, ...(stored.coverSources || {}) };
                 return {
-                    stores: { ...defaults.stores, ...(stored.stores || {}) },
-                    coverSources: { ...defaults.coverSources, ...(stored.coverSources || {}) },
+                    stores: Object.fromEntries(MARKET_SOURCE_KEYS.map(k => [k, !!mergedStores[k]])),
+                    coverSources: Object.fromEntries(COVER_SOURCE_KEYS.map(k => [k, !!mergedCoverSources[k]])),
                     emulators: { ...defaults.emulators, ...(stored.emulators || {}) },
                     emulatorJsCores: { ...defaults.emulatorJsCores, ...(stored.emulatorJsCores || {}) }
                 };
@@ -883,7 +889,7 @@
 
             try {
                 const settings = getSettings();
-                const activeStores = Object.entries(settings.stores || {}).filter(([_, enabled]) => !!enabled).map(([key]) => key);
+                const activeStores = MARKET_SOURCE_KEYS.filter(key => !!settings.stores?.[key]);
                 if (!activeStores.length) {
                     status.textContent = 'NO MARKET SOURCE ENABLED';
                     sectionsContainer.innerHTML = `<div class="py-20 text-center font-black text-yellow-400/70 italic uppercase tracking-[0.2em]">Enable at least one Marketplace Source in Settings.</div>`;
@@ -920,7 +926,7 @@
                             <h3 class="text-[10px] font-black italic text-blue-500 uppercase tracking-[0.4em] mb-4 border-b border-blue-500/10 pb-2">${header} <span class="text-white/20 ml-2">(${games.length})</span></h3>
                             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4" id="console-grid-${index}">
                                 ${games.map(game => `
-                                    <div class="game-card glass rounded-2xl p-4 flex flex-col h-72 relative overflow-hidden group border border-white/5 cursor-pointer" onclick="showMarketGameDetails('${game.link}')">
+                                    <div class="game-card glass rounded-2xl p-4 flex flex-col h-72 relative overflow-hidden group border border-white/5 cursor-pointer" onclick="showMarketGameDetails('${game.link}', '${game.console_id || ''}')">
                                         <div class="w-full h-36 bg-black/40 rounded-xl mb-3 overflow-hidden relative">
                                             <img src="${game.thumbnail ? API.proxyImg(game.thumbnail) : 'https://placehold.co/400x300/111/555?text=No+Boxart'}" loading="lazy"
                                                  class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500">
@@ -946,18 +952,19 @@
             }
         }
 
-        async function showMarketGameDetails(url) {
+        async function showMarketGameDetails(url, consoleHint = '') {
             state.lastGameUrl = url;
+            state.lastGameConsole = consoleHint || state.searchConsoleFilter || state.lastGameConsole || '';
             navTo('MARKET-DETAIL');
             const container = document.getElementById('market-detail-container');
             container.innerHTML = `<div class="h-64 flex items-center justify-center font-black italic text-white/10 animate-pulse text-sm uppercase tracking-[0.3em]">Synchronizing Asset Data...</div>`;
             
             try {
-                const data = await API.getGame(url);
+                const data = await API.getGame(url, state.lastGameConsole || undefined);
                 const game = data.game;
-                let marketCover = game.thumbnail;
+                let marketCover = game.thumbnail || (game.screenshots?.[0] || null);
                 try {
-                    const coverSources = Object.entries(getSettings().coverSources || {}).filter(([_, enabled]) => !!enabled).map(([key]) => key);
+                    const coverSources = COVER_SOURCE_KEYS.filter(key => !!getSettings().coverSources?.[key]);
                     if (coverSources.length) {
                         const coverResponse = await API.getMarketCover(game.title, game.console, coverSources);
                         if (coverResponse?.cover) {
@@ -1307,7 +1314,8 @@
             addonsContainer.innerHTML = '';
             emulatorContainer.innerHTML = '';
 
-            Object.entries(settings.stores).forEach(([key, enabled]) => {
+            MARKET_SOURCE_KEYS.forEach((key) => {
+                const enabled = !!settings.stores[key];
                 const row = document.createElement('label');
                 row.className = 'flex items-center justify-between bg-white/5 rounded-xl px-4 py-3 border border-white/5';
                 row.innerHTML = `
@@ -1321,7 +1329,8 @@
                 storeContainer.appendChild(row);
             });
 
-            Object.entries(settings.coverSources).forEach(([key, enabled]) => {
+            COVER_SOURCE_KEYS.forEach((key) => {
+                const enabled = !!settings.coverSources[key];
                 const row = document.createElement('label');
                 row.className = 'flex items-center justify-between bg-white/5 rounded-xl px-4 py-3 border border-white/5';
                 row.innerHTML = `
