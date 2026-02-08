@@ -304,6 +304,78 @@ def get_libreto_art(title, console_id=None):
     }
 
 
+
+
+def parse_source_list(raw, default):
+    values = [part.strip().lower() for part in (raw or '').split(',') if part.strip()]
+    return values or list(default)
+
+
+def local_game_folder(console_id, folder_name):
+    safe_console = sanitize_filename(console_id or 'misc')
+    safe_folder = sanitize_filename(folder_name or '')
+    return os.path.join(ROM_DIR, safe_console, safe_folder)
+
+
+def build_cover_candidates(title, console_id=None, cover_sources=None):
+    sources = cover_sources or ["libreto", "vimm", "thegamesdb"]
+    candidates = []
+
+    if "libreto" in sources:
+        libreto_data = get_libreto_art(title, console_id=console_id)
+        if libreto_data:
+            if libreto_data.get("cover_front"):
+                candidates.append({"source": "libreto", "type": "cover", "url": libreto_data["cover_front"], "label": "Libreto Cover"})
+            if libreto_data.get("clearlogo"):
+                candidates.append({"source": "libreto", "type": "logo", "url": libreto_data["clearlogo"], "label": "Libreto Logo"})
+            for idx, shot in enumerate((libreto_data.get("fanart") or [])[:10], start=1):
+                candidates.append({"source": "libreto", "type": "screenshot", "url": shot, "label": f"Libreto Shot {idx}"})
+
+    if "vimm" in sources:
+        try:
+            vimm_results = search_vimm_games(title, console_id=console_id)
+        except requests.RequestException:
+            vimm_results = []
+        for result in vimm_results[:3]:
+            if result.get("thumbnail"):
+                candidates.append({"source": "vimm", "type": "cover", "url": result["thumbnail"], "label": f"VIMM {result.get('title','Cover')}"})
+            try:
+                html = vimm_request(result.get("link")).text
+                details = parse_vimm_rom_page(html, result.get("link"), console_id=console_id)
+                for idx, shot in enumerate((details.get("screenshots") or [])[:6], start=1):
+                    candidates.append({"source": "vimm", "type": "screenshot", "url": shot, "label": f"VIMM Shot {idx}"})
+            except Exception:
+                pass
+
+    if "thegamesdb" in sources:
+        platform_id = THEGAMESDB_PLATFORMS.get((console_id or '').lower())
+        try:
+            results = search_thegamesdb(title, platform_id=platform_id, limit=2)
+        except requests.RequestException:
+            results = []
+        for result in results:
+            try:
+                details = scrape_thegamesdb_details(result.get("url"))
+            except requests.RequestException:
+                continue
+            if details.get("cover_front"):
+                candidates.append({"source": "thegamesdb", "type": "cover", "url": details["cover_front"], "label": "TheGamesDB Cover"})
+            if details.get("clearlogo"):
+                candidates.append({"source": "thegamesdb", "type": "logo", "url": details["clearlogo"], "label": "TheGamesDB Logo"})
+            for idx, shot in enumerate((details.get("fanart") or [])[:8], start=1):
+                candidates.append({"source": "thegamesdb", "type": "screenshot", "url": shot, "label": f"TheGamesDB Art {idx}"})
+
+    seen = set()
+    deduped = []
+    for item in candidates:
+        url = safe_url(item.get("url"))
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        clean = dict(item)
+        clean["url"] = url
+        deduped.append(clean)
+    return deduped
 def log_request(url, status_code):
     now = datetime.now()
     log_file = os.path.join(LOG_DIR, f"{now.strftime('%Y-%m-%d')}.log")
@@ -1102,10 +1174,9 @@ def list_consoles_route():
 @app.route("/refresh_covers")
 def refresh_covers():
     console = request.args.get("console")
-    cover_sources_raw = request.args.get("cover_sources", "")
-    cover_sources = [s.strip().lower() for s in cover_sources_raw.split(",") if s.strip()]
-    results = refresh_missing_covers(console, cover_sources=cover_sources or None)
-    return jsonify({"status": "ok", "cover_sources": cover_sources or ["libreto", "vimm", "thegamesdb"], **results})
+    cover_sources = parse_source_list(request.args.get("cover_sources", ""), ["libreto", "vimm", "thegamesdb"])
+    results = refresh_missing_covers(console, cover_sources=cover_sources)
+    return jsonify({"status": "ok", "cover_sources": cover_sources, **results})
 
 @app.route("/download_status")
 def download_status():
@@ -1121,8 +1192,7 @@ def market_cover():
     if not title:
         return jsonify({"status": "error", "message": "Missing title"}), 400
 
-    cover_sources_raw = request.args.get("cover_sources", "")
-    cover_sources = [s.strip().lower() for s in cover_sources_raw.split(",") if s.strip()] or ["libreto", "vimm", "thegamesdb"]
+    cover_sources = parse_source_list(request.args.get("cover_sources", ""), ["libreto", "vimm", "thegamesdb"])
 
     cover = None
     clearlogo = None
@@ -1149,6 +1219,61 @@ def market_cover():
         except requests.RequestException:
             cover = None
     return jsonify({"status": "ok", "cover": cover, "clearlogo": clearlogo, "screenshots": screenshots, "cover_sources": cover_sources})
+
+
+@app.route("/cover_candidates")
+def cover_candidates():
+    title = request.args.get("title", "").strip()
+    console = request.args.get("console", "").strip().lower() or None
+    if not title:
+        return jsonify({"status": "error", "message": "Missing title", "candidates": []}), 400
+    cover_sources = parse_source_list(request.args.get("cover_sources", ""), ["libreto", "vimm", "thegamesdb"])
+    results = build_cover_candidates(title, console_id=console, cover_sources=cover_sources)
+    return jsonify({"status": "ok", "cover_sources": cover_sources, "candidates": results})
+
+
+@app.route("/update_local_metadata", methods=["POST"])
+def update_local_metadata():
+    payload = request.get_json(silent=True) or {}
+    console = (payload.get("console") or "").strip()
+    folder = (payload.get("folder") or "").strip()
+    if not console or not folder:
+        return jsonify({"status": "error", "message": "Missing console/folder"}), 400
+
+    game_folder = local_game_folder(console, folder)
+    if not os.path.isdir(game_folder):
+        return jsonify({"status": "error", "message": "Game folder not found"}), 404
+
+    metadata_path = os.path.join(game_folder, "metadata.json")
+    existing = load_local_metadata(metadata_path) or {}
+
+    incoming = {
+        "title": payload.get("title"),
+        "description": payload.get("description"),
+        "overview": payload.get("overview"),
+        "cover_front": payload.get("cover_front"),
+        "clearlogo": payload.get("clearlogo"),
+        "screenshots": payload.get("screenshots") or [],
+        "fanart": payload.get("fanart") or [],
+        "info": payload.get("info") if isinstance(payload.get("info"), dict) else (existing.get("info") or {}),
+    }
+
+    merged = merge_metadata(existing, incoming)
+    if incoming.get("info"):
+        merged["info"] = incoming["info"]
+
+    with open(metadata_path, "w", encoding="utf-8") as f:
+        json.dump(merged, f, ensure_ascii=False, indent=2)
+
+    return jsonify({"status": "ok", "metadata": merged})
+
+
+@app.route("/refresh_local_files")
+def refresh_local_files():
+    console = request.args.get("console")
+    cover_sources = parse_source_list(request.args.get("cover_sources", ""), ["libreto", "vimm", "thegamesdb"])
+    results = refresh_missing_covers(console, cover_sources=cover_sources)
+    return jsonify({"status": "ok", "cover_sources": cover_sources, **results})
 
 @app.route("/addons")
 def list_addons():
