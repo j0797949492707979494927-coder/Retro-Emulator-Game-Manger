@@ -692,10 +692,12 @@ def parse_vimm_rom_page(html, url, console_id=None):
         encoded_name = urllib.parse.quote(rom_name, safe='')
         encoded_media = urllib.parse.quote(media_id, safe='')
         encoded_console = urllib.parse.quote((console_id or "misc"), safe='')
+        direct_url = f"https://dl3.vimm.net/?mediaId={encoded_media}"
+        encoded_direct = urllib.parse.quote(direct_url, safe='')
         data["downloads"].append({
             "name": rom_name,
             "local": False,
-            "download_url": f"/download?mediaId={encoded_media}&filename={encoded_name}&console={encoded_console}&game_url={encoded_game}"
+            "download_url": f"/download?url={encoded_direct}&mediaId={encoded_media}&filename={encoded_name}&console={encoded_console}&game_url={encoded_game}"
         })
 
     return data
@@ -1178,9 +1180,22 @@ def run_download_job(job_id, rom_url, rom_name, console, game_url, media_id=None
         if not os.path.isfile(file_path):
             with requests.get(rom_url, headers={"User-Agent": "Mozilla/5.0"}, stream=True) as r:
                 r.raise_for_status()
+                total_bytes = r.headers.get("Content-Length")
+                try:
+                    total_bytes = int(total_bytes) if total_bytes else None
+                except (TypeError, ValueError):
+                    total_bytes = None
+                download_jobs[job_id]["total_bytes"] = total_bytes
+                download_jobs[job_id]["downloaded_bytes"] = 0
                 with open(file_path, "wb") as f:
                     for chunk in r.iter_content(8192):
+                        if not chunk:
+                            continue
                         f.write(chunk)
+                        download_jobs[job_id]["downloaded_bytes"] += len(chunk)
+                        if total_bytes:
+                            pct = int((download_jobs[job_id]["downloaded_bytes"] / total_bytes) * 100)
+                            download_jobs[job_id]["progress"] = max(0, min(100, pct))
 
         if game_url:
             try:
@@ -1216,6 +1231,7 @@ def run_download_job(job_id, rom_url, rom_name, console, game_url, media_id=None
                     json.dump(merged, f, ensure_ascii=False, indent=2)
                 enrich_metadata(game_folder, base_name, console, seed_title=merged.get("title"), cover_sources=["libreto", "vimm", "thegamesdb"])
         download_jobs[job_id]["status"] = "complete"
+        download_jobs[job_id]["progress"] = 100
     except Exception as exc:
         download_jobs[job_id]["status"] = "error"
         download_jobs[job_id]["error"] = str(exc)
@@ -1311,7 +1327,7 @@ def download_rom():
     if (not rom_url and not media_id) or not rom_name:
         return jsonify({"error": "Missing parameters"}), 400
     job_id = str(uuid.uuid4())
-    download_jobs[job_id] = {"status": "queued", "error": None}
+    download_jobs[job_id] = {"status": "queued", "error": None, "downloaded_bytes": 0, "total_bytes": None, "progress": 0}
     thread = threading.Thread(
         target=run_download_job,
         args=(job_id, rom_url, rom_name, console, game_url, media_id),

@@ -1073,7 +1073,7 @@
                                         ${rom.local ? `
                                             <button class="px-5 py-2 bg-white/5 text-white/10 rounded-xl text-[9px] font-black uppercase tracking-widest cursor-not-allowed">LINKED</button>
                                         ` : `
-                                            <button onclick="handleDownloadROM(this, '${rom.download_url}')" class="px-6 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-[9px] font-black uppercase tracking-widest transition-all">PULL ROM</button>
+                                            <button onclick="handleDownloadROM(this, '${rom.download_url}')" data-size="${(game.info && game.info.download_size) ? game.info.download_size : ''}" class="px-6 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-[9px] font-black uppercase tracking-widest transition-all relative overflow-hidden">PULL ROM</button>
                                         `}
                                     </div>
                                 `).join('')}
@@ -1321,9 +1321,10 @@
         async function handleDownloadROM(button, url) {
             if (!button || button.disabled) return;
             const originalText = button.textContent;
-            button.textContent = 'DOWNLOADING...';
+            const originalBg = button.style.backgroundImage;
+            const sizeHint = button.dataset.size || '';
             button.disabled = true;
-            button.classList.add('cursor-wait', 'opacity-60');
+            button.classList.add('cursor-wait');
             try {
                 const response = await API.download(url);
                 if (!response?.job_id) {
@@ -1332,11 +1333,23 @@
                 const jobId = response.job_id;
                 let finished = false;
                 while (!finished) {
-                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    await new Promise(resolve => setTimeout(resolve, 700));
                     const status = await API.downloadStatus(jobId);
-                    if (status?.job?.status === 'complete') {
+                    const job = status?.job || {};
+                    const progress = Math.max(0, Math.min(100, Number(job.progress || 0)));
+                    const downloaded = Number(job.downloaded_bytes || 0);
+                    const total = Number(job.total_bytes || 0);
+                    const progressLabel = total > 0
+                        ? `${Math.round((downloaded / (1024 * 1024)) * 10) / 10} / ${Math.round((total / (1024 * 1024)) * 10) / 10} MB`
+                        : (sizeHint ? `~ ${sizeHint}` : `${Math.round((downloaded / (1024 * 1024)) * 10) / 10} MB`);
+                    button.textContent = `DOWNLOADING ${progress}%`;
+                    button.style.backgroundImage = `linear-gradient(90deg, rgba(59,130,246,0.95) ${progress}%, rgba(15,23,42,0.9) ${progress}%)`;
+                    button.title = progressLabel;
+                    if (job.status === 'complete') {
                         finished = true;
                         button.textContent = 'LINKED';
+                        button.style.backgroundImage = '';
+                        button.classList.remove('cursor-wait');
                         button.classList.add('cursor-not-allowed');
                         if (state.selectedConsole) {
                             await loadConsoleList();
@@ -1344,14 +1357,16 @@
                         } else {
                             await loadConsoleList();
                         }
-                    } else if (status?.job?.status === 'error') {
-                        throw new Error(status.job.error || 'Download failed');
+                    } else if (job.status === 'error') {
+                        throw new Error(job.error || 'Download failed');
                     }
                 }
             } catch (e) {
                 button.textContent = originalText;
                 button.disabled = false;
-                button.classList.remove('cursor-wait', 'opacity-60');
+                button.style.backgroundImage = originalBg;
+                button.classList.remove('cursor-wait');
+                button.title = '';
             }
         }
 
