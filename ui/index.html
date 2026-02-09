@@ -405,7 +405,7 @@
         const API = {
             search: (q, consoleId, stores) => { const params = new URLSearchParams({ q }); if (consoleId) params.set('console', consoleId); if (stores?.length) params.set('stores', stores.join(',')); return fetch(`/search?${params.toString()}`).then(r => r.json()); },
             getGame: (url, consoleId) => fetch(`/game?url=${encodeURIComponent(url)}${consoleId ? `&console=${encodeURIComponent(consoleId)}` : ''}`).then(r => r.json()),
-            getMarketCover: (title, console, coverSources) => { const params = new URLSearchParams({ title, console: console || '' }); if (coverSources?.length) params.set('cover_sources', coverSources.join(',')); return fetch(`/market_cover?${params.toString()}`).then(r => r.json()); },
+            getMarketCover: (title, console, coverSources, sourceUrl) => { const params = new URLSearchParams({ title: title || '', console: console || '' }); if (sourceUrl) params.set('source_url', sourceUrl); if (coverSources?.length) params.set('cover_sources', coverSources.join(',')); return fetch(`/market_cover?${params.toString()}`).then(r => r.json()); },
             listLocal: (console) => fetch(`/list_console?console=${console}`).then(r => r.json()),
             listConsoles: () => fetch(`/list_consoles`).then(r => r.json()),
             listAddons: () => fetch(`/addons`).then(r => r.json()),
@@ -1017,7 +1017,7 @@
                 try {
                     const coverSources = COVER_SOURCE_KEYS.filter(key => !!getSettings().coverSources?.[key]);
                     if (coverSources.length) {
-                        const coverResponse = await API.getMarketCover(game.title, game.console, coverSources);
+                        const coverResponse = await API.getMarketCover(game.title, game.console, coverSources, state.lastGameUrl || url);
                         if (coverResponse?.cover) {
                             marketCover = coverResponse.cover;
                         } else if (coverResponse?.screenshots?.length) {

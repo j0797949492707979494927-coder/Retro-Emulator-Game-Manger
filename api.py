@@ -441,6 +441,27 @@ def sanitize_vimm_query(query):
     return normalized[:96]
 
 
+
+
+def extract_vimm_game_id(url_or_href):
+    raw = (url_or_href or "").strip()
+    if not raw:
+        return None
+    parsed = urllib.parse.urlparse(raw)
+    params = urllib.parse.parse_qs(parsed.query)
+    for key in ("id", "game", "gameId"):
+        val = (params.get(key) or [None])[0]
+        if val and str(val).isdigit():
+            return str(val)
+
+    path = parsed.path or raw
+    m = re.search(r"/vault/(\d+)(?:$|[/?#])", path)
+    if m:
+        return m.group(1)
+
+    tail = path.rstrip('/').split('/')[-1]
+    return tail if tail.isdigit() else None
+
 def parse_vimm_search_html(html, console_label=None):
     soup = BeautifulSoup(html, "html.parser")
     games = []
@@ -452,23 +473,28 @@ def parse_vimm_search_html(html, console_label=None):
         if len(cols) < 5:
             continue
 
-        # VIMM often places console in col[0] and title/link in col[1], so do not assume
-        # the first column contains the game link.
-        link = row.select_one('a[href*="/vault/"]')
-        if not link:
+        # VIMM can include multiple vault links per row; pick the best title-like link.
+        candidate_links = row.select('a[href*="/vault/"]')
+        best = None
+        for cand in candidate_links:
+            href = (cand.get("href") or "").strip()
+            if not href or href.startswith("#") or href.lower().startswith("javascript:"):
+                continue
+            title_text = cand.get_text(" ", strip=True)
+            if not title_text:
+                continue
+            game_url = urllib.parse.urljoin(VIMM_BASE_URL + "/", href)
+            if "/vault" not in urllib.parse.urlparse(game_url).path:
+                continue
+            game_id = extract_vimm_game_id(href) or extract_vimm_game_id(game_url)
+            score = (2 if game_id else 0) + min(len(title_text), 80) / 100.0
+            if best is None or score > best[0]:
+                best = (score, cand, href, title_text, game_url, game_id)
+
+        if not best:
             continue
 
-        href = (link.get("href") or "").strip()
-        if not href or href.startswith("#") or href.lower().startswith("javascript:"):
-            continue
-
-        title = link.get_text(" ", strip=True)
-        if not title:
-            continue
-
-        game_url = urllib.parse.urljoin(VIMM_BASE_URL + "/", href)
-        if "/vault" not in urllib.parse.urlparse(game_url).path:
-            continue
+        _, link, href, title, game_url, game_id = best
 
         # Parse supporting fields with flexible indexing so both 5-col and 6-col layouts work.
         region = "-"
@@ -482,8 +508,7 @@ def parse_vimm_search_html(html, console_label=None):
         rating = rating_link.get_text(" ", strip=True) if rating_link else cols[-1].get_text(" ", strip=True)
         rating = rating or "-"
 
-        game_id = game_url.rstrip("/").split("/")[-1]
-        box_url = f"https://dl.vimm.net/image.php?type=box&id={game_id}" if game_id.isdigit() else None
+        box_url = f"https://dl.vimm.net/image.php?type=box&id={game_id}" if game_id else None
         games.append({
             "title": title,
             "link": game_url,
@@ -670,9 +695,23 @@ def parse_vimm_rom_page(html, url, console_id=None):
             if text:
                 data["description"] = text
 
-    game_id = url.rstrip("/").split("/")[-1]
-    if game_id.isdigit():
+    # Prefer concrete media URLs from page elements when present.
+    box_node = soup.select_one("img[title='Click to enlarge'], img[src*='type=box']")
+    if box_node and box_node.get("src"):
+        data["thumbnail"] = safe_url(box_node.get("src"))
+
+    shot_urls = []
+    for n in soup.select("img[src*='type=screen'], a[href*='type=screen']"):
+        u = safe_url(n.get("src") or n.get("href"))
+        if u and u not in shot_urls:
+            shot_urls.append(u)
+    if shot_urls:
+        data["screenshots"] = shot_urls
+
+    game_id = extract_vimm_game_id(url)
+    if game_id and not data.get("thumbnail"):
         data["thumbnail"] = f"https://dl.vimm.net/image.php?type=box&id={game_id}"
+    if game_id and not data.get("screenshots"):
         data["screenshots"].append(f"https://dl.vimm.net/image.php?type=screen&id={game_id}")
 
     dl_form = soup.find("form", id="dl_form")
@@ -1419,7 +1458,8 @@ def download_status():
 def market_cover():
     title = request.args.get("title")
     console = request.args.get("console")
-    if not title:
+    source_url = request.args.get("source_url")
+    if not title and not source_url:
         return jsonify({"status": "error", "message": "Missing title"}), 400
 
     cover_sources = parse_source_list(request.args.get("cover_sources", ""), ["libreto", "vimm", "thegamesdb"])
@@ -1435,13 +1475,19 @@ def market_cover():
             clearlogo = libreto_data.get("clearlogo") or clearlogo
             screenshots = libreto_data.get("fanart") or screenshots
 
-    if not cover and "vimm" in cover_sources:
+    if "vimm" in cover_sources:
         try:
-            vimm_results = search_vimm_games(title, console_id=console)
-            if vimm_results and vimm_results[0].get("thumbnail"):
-                cover = vimm_results[0]["thumbnail"]
+            if source_url and "vimm.net" in source_url:
+                html = curl_get(source_url)
+                details = parse_vimm_rom_page(html, source_url, console_id=console)
+                cover = details.get("thumbnail") or cover
+                screenshots = details.get("screenshots") or screenshots
+            elif not cover and title:
+                vimm_results = search_vimm_games(title, console_id=console)
+                if vimm_results and vimm_results[0].get("thumbnail"):
+                    cover = vimm_results[0]["thumbnail"]
         except requests.RequestException:
-            cover = None
+            cover = cover
 
     if not cover and "thegamesdb" in cover_sources:
         try:
