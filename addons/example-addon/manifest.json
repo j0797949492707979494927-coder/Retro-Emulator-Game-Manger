@@ -1,0 +1,9 @@
+{
+  "name": "Example Add-on",
+  "menu_item": {
+    "label": "Addon Hub",
+    "icon": "sparkles"
+  },
+  "description": "Sample addon that adds a menu entry placeholder.",
+  "version": "0.1.0"
+}
